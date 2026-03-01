@@ -1,4 +1,5 @@
-// All MCP tool registrations for the Dioverse Studio API
+// All MCP tool registrations for the Mycelium API (formerly Dioverse Studio)
+// Tools are registered as mycelium_* (primary) with studio_* aliases.
 
 import { z } from 'zod';
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
@@ -6,6 +7,13 @@ import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat } from
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
+}
+
+// Register a tool under both mycelium_* (primary) and studio_* (alias) names
+function registerDual(server, studioName, description, schema, handler) {
+  var myceliumName = studioName.replace(/^studio_/, 'mycelium_');
+  server.tool(myceliumName, description, schema, handler);
+  server.tool(studioName, description, schema, handler);
 }
 
 function timeAgo(iso) {
@@ -19,7 +27,8 @@ function timeAgo(iso) {
 
 function formatAgent(a) {
   var line = (a.status === 'online' ? '[ON] ' : '[OFF] ') + a.name + ' (' + a.id + ')';
-  if (a.game) line += ' — ' + a.game;
+  if (a.project) line += ' — ' + a.project;
+  else if (a.game) line += ' — ' + a.game;
   if (a.working_on) line += '\n  Working on: ' + a.working_on;
   line += '\n  Heartbeat: ' + timeAgo(a.last_heartbeat);
   return line;
@@ -39,8 +48,9 @@ function formatMessage(m) {
 }
 
 function formatBug(b) {
+  var proj = b.project || b.game;
   return '#' + b.id + ' [' + b.severity + '] ' + b.title +
-    ' (' + b.game + ', ' + b.status + ')' +
+    ' (' + proj + ', ' + b.status + ')' +
     (b.assignee ? ' → ' + b.assignee : '');
 }
 
@@ -59,7 +69,7 @@ export function registerTools(server) {
 
   // ===== SESSION =====
 
-  server.tool(
+  registerDual(server,
     'studio_boot',
     'Boot agent session or get admin overview. Agent mode: starts auto-heartbeat, returns tasks/messages/plans. Admin mode: returns full dashboard.',
     {},
@@ -69,7 +79,8 @@ export function registerTools(server) {
         var data = await apiGet('/boot/' + st.agentId);
         setBooted(data);
         startHeartbeat();
-        var lines = ['Booted as ' + st.agentId + ' (' + data.agent.game + ')', ''];
+        var proj = data.agent.project || data.agent.game;
+        var lines = ['Booted as ' + st.agentId + ' (' + proj + ')', ''];
 
         if (data.tasks.length) {
           lines.push('=== My Tasks (' + data.tasks.length + ') ===');
@@ -114,9 +125,9 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_overview',
-    'Get full Studio dashboard snapshot: agents, tasks, messages, plans, bugs.',
+    'Get full Mycelium dashboard snapshot: agents, tasks, messages, plans, bugs.',
     {},
     async () => {
       var data = await apiGet('/admin/overview');
@@ -126,7 +137,7 @@ export function registerTools(server) {
 
   // ===== TASKS =====
 
-  server.tool(
+  registerDual(server,
     'studio_get_work',
     'Get prioritized work list: plan steps first, then assigned tasks, then open bugs. Use this to figure out what to work on next.',
     {},
@@ -163,7 +174,7 @@ export function registerTools(server) {
           lines.push('');
         }
 
-        // 3. Open bugs for my game
+        // 3. Open bugs for my project
         if (data.open_bugs && data.open_bugs.length) {
           lines.push('=== Open Bugs (Priority 3) ===');
           for (var b of data.open_bugs) lines.push(formatBug(b));
@@ -200,7 +211,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_claim_task',
     'Claim a task: assigns it to you, sets status to in_progress, and updates your working_on status automatically.',
     { task_id: z.number().describe('Task ID to claim') },
@@ -220,7 +231,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_complete_task',
     'Mark a task as done. Automatically advances working_on to next task or clears it if no more work.',
     {
@@ -254,13 +265,13 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_create_task',
     'Create a new task on the board.',
     {
       title: z.string().describe('Task title'),
       description: z.string().describe('Task description'),
-      game: z.string().describe('Game: willing-sacrifice, king-city, or dioverse'),
+      game: z.string().describe('Project: willing-sacrifice, king-city, or dioverse'),
       priority: z.enum(['low', 'normal', 'high']).optional().describe('Priority level'),
       assignee: z.string().optional().describe('Agent ID to assign to'),
       needs_approval: z.boolean().optional().describe('Whether task needs admin approval before work starts')
@@ -283,13 +294,13 @@ export function registerTools(server) {
 
   // ===== COMMUNICATION =====
 
-  server.tool(
+  registerDual(server,
     'studio_send_message',
     'Send a message to an agent or broadcast to all.',
     {
       content: z.string().describe('Message content'),
       to: z.string().optional().describe('Agent ID to send to (omit for broadcast)'),
-      game: z.string().optional().describe('Game context')
+      game: z.string().optional().describe('Project context')
     },
     async (args) => {
       var st = getState();
@@ -304,14 +315,14 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_send_request',
     'Send a blocking request to an agent. They must respond before you can continue.',
     {
       content: z.string().describe('What you need from them'),
       to: z.string().describe('Agent ID to request from'),
       auto_task: z.boolean().optional().describe('Auto-create a task for this request'),
-      game: z.string().optional().describe('Game context')
+      game: z.string().optional().describe('Project context')
     },
     async (args) => {
       var st = getState();
@@ -328,7 +339,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_respond_to_request',
     'Respond to a pending request, resolving it.',
     {
@@ -341,7 +352,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_read_messages',
     'Read recent messages and pending requests.',
     {
@@ -364,11 +375,11 @@ export function registerTools(server) {
 
   // ===== PLANS =====
 
-  server.tool(
+  registerDual(server,
     'studio_check_plans',
     'View active plans and their steps.',
     {
-      game: z.string().optional().describe('Filter by game'),
+      game: z.string().optional().describe('Filter by project'),
       status: z.string().optional().describe('Filter by status (default: active)')
     },
     async (args) => {
@@ -389,7 +400,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_update_step',
     'Update a plan step status, assignee, or linked resources.',
     {
@@ -413,11 +424,11 @@ export function registerTools(server) {
 
   // ===== CONTEXT =====
 
-  server.tool(
+  registerDual(server,
     'studio_get_context',
     'Read context keys from namespaced storage.',
     {
-      namespace: z.string().describe('Namespace (e.g. agent name, game name)'),
+      namespace: z.string().describe('Namespace (e.g. agent name, project name)'),
       key: z.string().optional().describe('Specific key to read (omit for all keys in namespace)')
     },
     async (args) => {
@@ -430,7 +441,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_set_context',
     'Store a value in namespaced context storage. Persists across sessions.',
     {
@@ -448,11 +459,11 @@ export function registerTools(server) {
 
   // ===== BUGS =====
 
-  server.tool(
+  registerDual(server,
     'studio_list_bugs',
     'List bug reports.',
     {
-      game: z.string().optional().describe('Filter by game'),
+      game: z.string().optional().describe('Filter by project'),
       status: z.string().optional().describe('Filter by status: open, in_progress, fixed, closed')
     },
     async (args) => {
@@ -466,7 +477,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_claim_bug',
     'Claim a bug and start working on it. Updates your working_on status.',
     { bug_id: z.number().describe('Bug ID to claim') },
@@ -483,7 +494,7 @@ export function registerTools(server) {
     }
   );
 
-  server.tool(
+  registerDual(server,
     'studio_fix_bug',
     'Mark a bug as fixed. Clears working_on if no other work.',
     {
@@ -513,7 +524,7 @@ export function registerTools(server) {
 
   // ===== HEARTBEAT =====
 
-  server.tool(
+  registerDual(server,
     'studio_heartbeat',
     'Manually update your working_on status and send a heartbeat.',
     {
@@ -531,9 +542,9 @@ export function registerTools(server) {
 
   // ===== RAW API =====
 
-  server.tool(
+  registerDual(server,
     'studio_api',
-    'Raw API call to any Dioverse endpoint. Use for operations not covered by other tools.',
+    'Raw API call to any Mycelium endpoint. Use for operations not covered by other tools.',
     {
       method: z.enum(['GET', 'POST', 'PUT', 'DELETE']).describe('HTTP method'),
       path: z.string().describe('API path (e.g. /tasks, /agents/greatness-claude)'),

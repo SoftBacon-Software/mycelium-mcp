@@ -3,8 +3,8 @@
 import { apiPost } from './api.js';
 
 var state = {
-  agentId: process.env.DIOVERSE_AGENT_ID || null,
-  role: process.env.DIOVERSE_ROLE || 'admin',
+  agentId: process.env.MYCELIUM_AGENT_ID || process.env.DIOVERSE_AGENT_ID || null,
+  role: process.env.MYCELIUM_ROLE || process.env.DIOVERSE_ROLE || 'admin',
   workingOn: '',
   booted: false,
   heartbeatTimer: null,
