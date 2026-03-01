@@ -112,6 +112,14 @@ export function registerTools(server) {
           lines.push('');
         }
 
+        if (data.my_approvals && data.my_approvals.length) {
+          lines.push('=== My Pending Approvals (' + data.my_approvals.length + ') ===');
+          for (var ap of data.my_approvals) {
+            lines.push('#' + ap.id + ' [' + ap.status + '] ' + ap.action_type + ': ' + ap.title);
+          }
+          lines.push('');
+        }
+
         lines.push('=== Other Agents ===');
         for (var a of (data.other_agents || [])) lines.push(formatAgent(a));
 
@@ -640,6 +648,103 @@ export function registerTools(server) {
     }
   );
 
+  // ===== APPROVAL GATES =====
+
+  registerDual(server,
+    'studio_request_approval',
+    'Request approval for a gated action (deploy, outreach_send, git_push, plan_create, money_action, delete, external_comm). Returns approval ID to poll.',
+    {
+      action_type: z.enum(['deploy', 'outreach_send', 'git_push', 'plan_create', 'money_action', 'delete', 'external_comm']).describe('Type of gated action'),
+      title: z.string().describe('Short description of what you want to do'),
+      payload: z.string().optional().describe('JSON string with action details (e.g. deploy target, branch, file to delete)'),
+      project: z.string().optional().describe('Project context (default: mycelium)')
+    },
+    async (args) => {
+      var st = getState();
+      var requester = st.agentId || '__admin__';
+      var result = await apiPost('/approvals', {
+        action_type: args.action_type,
+        requested_by: requester,
+        title: args.title,
+        payload: args.payload ? JSON.parse(args.payload) : {},
+        project: args.project || 'mycelium'
+      });
+      return text('Approval requested (id: ' + result.id + ')\nAction: ' + args.action_type + '\nTitle: ' + args.title + '\nStatus: pending — waiting for human approval in dashboard.\n\nPoll with studio_check_approval to check status.');
+    }
+  );
+
+  registerDual(server,
+    'studio_check_approval',
+    'Check the status of an approval request. Returns pending, approved, denied, or executed.',
+    {
+      approval_id: z.number().describe('Approval ID to check')
+    },
+    async (args) => {
+      var approval = await apiGet('/approvals/' + args.approval_id);
+      var lines = [
+        'Approval #' + approval.id + ' [' + approval.status + ']',
+        'Action: ' + approval.action_type,
+        'Title: ' + approval.title
+      ];
+      if (approval.status === 'approved') {
+        lines.push('Approved by: ' + (approval.decided_by || 'unknown') + ' at ' + (approval.decided_at || ''));
+        if (approval.reason) lines.push('Notes: ' + approval.reason);
+        lines.push('', 'You may now execute the action. Call studio_mark_executed when done.');
+      } else if (approval.status === 'denied') {
+        lines.push('Denied by: ' + (approval.decided_by || 'unknown'));
+        if (approval.reason) lines.push('Reason: ' + approval.reason);
+        lines.push('', 'Do NOT proceed with this action.');
+      } else if (approval.status === 'pending') {
+        lines.push('', 'Still waiting for human approval. Check back later.');
+      } else if (approval.status === 'executed') {
+        lines.push('Already executed at: ' + (approval.executed_at || ''));
+      }
+      if (approval.payload && typeof approval.payload === 'object' && Object.keys(approval.payload).length) {
+        lines.push('', 'Payload: ' + JSON.stringify(approval.payload, null, 2));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_mark_executed',
+    'Mark an approved action as executed. Call this after you have successfully performed the approved action.',
+    {
+      approval_id: z.number().describe('Approval ID to mark as executed')
+    },
+    async (args) => {
+      await apiPut('/approvals/' + args.approval_id + '/executed', {});
+      return text('Approval #' + args.approval_id + ' marked as executed.');
+    }
+  );
+
+  registerDual(server,
+    'studio_list_approvals',
+    'List approval requests. Defaults to pending. Use to see what needs approval or check history.',
+    {
+      status: z.enum(['pending', 'approved', 'denied', 'executed']).optional().describe('Filter by status (default: pending)'),
+      action_type: z.string().optional().describe('Filter by action type'),
+      project: z.string().optional().describe('Filter by project')
+    },
+    async (args) => {
+      var params = [];
+      if (args.status) params.push('status=' + encodeURIComponent(args.status));
+      else params.push('status=pending');
+      if (args.action_type) params.push('action_type=' + encodeURIComponent(args.action_type));
+      if (args.project) params.push('project=' + encodeURIComponent(args.project));
+      var qs = params.length ? '?' + params.join('&') : '';
+      var approvals = await apiGet('/approvals' + qs);
+      if (!approvals.length) return text('No approvals found.');
+      var lines = ['=== Approvals (' + approvals.length + ') ==='];
+      for (var a of approvals) {
+        lines.push('#' + a.id + ' [' + a.status + '] ' + a.action_type + ': ' + a.title +
+          (a.requested_by ? ' (by ' + a.requested_by + ')' : '') +
+          (a.project ? ' — ' + a.project : ''));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
   // ===== RAW API =====
 
   registerDual(server,
@@ -655,6 +760,156 @@ export function registerTools(server) {
       var fn = { GET: apiGet, POST: apiPost, PUT: apiPut, DELETE: apiDelete }[args.method];
       var result = await fn(args.path, parsed);
       return text(result);
+    }
+  );
+
+  // ===== OUTREACH =====
+
+  registerDual(server,
+    'studio_outreach_status',
+    'Get outreach pipeline status for a project — contact counts per status, active campaigns.',
+    { project: z.string().describe('Project ID (e.g. willing-sacrifice)') },
+    async (args) => {
+      var data = await apiGet('/outreach/status?project=' + encodeURIComponent(args.project));
+      var lines = ['=== Outreach Status: ' + args.project + ' ==='];
+      var counts = data.contact_counts || {};
+      for (var [status, count] of Object.entries(counts)) {
+        lines.push('  ' + status + ': ' + count);
+      }
+      lines.push('Active campaigns: ' + (data.active_campaigns || 0));
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_contacts',
+    'List outreach contacts. Filter by project, status, type.',
+    {
+      project: z.string().optional().describe('Filter by project'),
+      status: z.string().optional().describe('Filter by status (discovered, researched, draft_ready, approved, sent, followed_up, replied, covered, closed)'),
+      type: z.string().optional().describe('Filter by type (creator, press)'),
+      limit: z.number().optional().describe('Max results (default 50)')
+    },
+    async (args) => {
+      var params = [];
+      if (args.project) params.push('project=' + encodeURIComponent(args.project));
+      if (args.status) params.push('status=' + encodeURIComponent(args.status));
+      if (args.type) params.push('type=' + encodeURIComponent(args.type));
+      if (args.limit) params.push('limit=' + args.limit);
+      var contacts = await apiGet('/outreach/contacts' + (params.length ? '?' + params.join('&') : ''));
+      if (!contacts.length) return text('No contacts found.');
+      var lines = ['=== Outreach Contacts (' + contacts.length + ') ==='];
+      for (var c of contacts) lines.push(formatContact(c));
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_campaign',
+    'Create or update an outreach campaign for a project.',
+    {
+      action: z.enum(['create', 'update']).describe('create or update'),
+      project: z.string().optional().describe('Project ID (required for create)'),
+      name: z.string().optional().describe('Campaign name (required for create)'),
+      campaign_id: z.number().optional().describe('Campaign ID (required for update)'),
+      persona_prompt: z.string().optional().describe('System prompt for Claude pitch generation'),
+      game_facts: z.string().optional().describe('Game facts for Claude to reference'),
+      templates: z.string().optional().describe('JSON string of email templates'),
+      config: z.string().optional().describe('JSON string of campaign config (API keys, search queries, limits)')
+    },
+    async (args) => {
+      if (args.action === 'create') {
+        var body = { project: args.project, name: args.name };
+        if (args.persona_prompt) body.persona_prompt = args.persona_prompt;
+        if (args.game_facts) body.game_facts = args.game_facts;
+        if (args.templates) body.templates = args.templates;
+        if (args.config) body.config = args.config;
+        var result = await apiPost('/outreach/campaigns', body);
+        return text('Campaign created: #' + result.id + ' "' + result.name + '"');
+      } else {
+        var updateBody = {};
+        if (args.name) updateBody.name = args.name;
+        if (args.persona_prompt) updateBody.persona_prompt = args.persona_prompt;
+        if (args.game_facts) updateBody.game_facts = args.game_facts;
+        if (args.templates) updateBody.templates = args.templates;
+        if (args.config) updateBody.config = args.config;
+        await apiPut('/outreach/campaigns/' + args.campaign_id, updateBody);
+        return text('Campaign #' + args.campaign_id + ' updated.');
+      }
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_discover',
+    'Run contact discovery for a campaign — searches YouTube for creators and Hunter.io for press contacts.',
+    { campaign_id: z.number().describe('Campaign ID to run discovery for') },
+    async (args) => {
+      var result = await apiPost('/outreach/discover', { campaign_id: args.campaign_id });
+      return text('Discovery complete: ' + result.creators + ' creators, ' + result.press + ' press (' + result.total + ' total new contacts)');
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_research',
+    'Research a contact — fetch their latest YouTube video or press article.',
+    { contact_id: z.number().describe('Contact ID to research') },
+    async (args) => {
+      var result = await apiPost('/outreach/research/' + args.contact_id, {});
+      return text('Researched contact #' + args.contact_id + ': ' + JSON.stringify(result.updates || {}));
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_personalize',
+    'Generate a Claude-personalized pitch for a contact using their campaign persona and templates.',
+    { contact_id: z.number().describe('Contact ID to personalize pitch for') },
+    async (args) => {
+      var result = await apiPost('/outreach/personalize/' + args.contact_id, {});
+      return text('Pitch generated for contact #' + args.contact_id + '\nSubject: ' + result.subject + '\nPreview: ' + result.body_preview);
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_approve',
+    'Approve a draft pitch for sending. Optionally edit subject/body.',
+    {
+      contact_id: z.number().describe('Contact ID to approve'),
+      pitch_subject: z.string().optional().describe('Override subject (optional)'),
+      pitch_body: z.string().optional().describe('Override body (optional)')
+    },
+    async (args) => {
+      var body = {};
+      if (args.pitch_subject) body.pitch_subject = args.pitch_subject;
+      if (args.pitch_body) body.pitch_body = args.pitch_body;
+      await apiPut('/outreach/approve/' + args.contact_id, body);
+      return text('Contact #' + args.contact_id + ' approved for sending.');
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_send',
+    'Send an approved pitch to a contact via Gmail. Set dry_run=false to actually send.',
+    {
+      contact_id: z.number().describe('Contact ID to send pitch to'),
+      dry_run: z.boolean().optional().describe('If true (default), simulate without sending')
+    },
+    async (args) => {
+      var result = await apiPost('/outreach/send/' + args.contact_id, { dry_run: args.dry_run !== false });
+      if (result.dry_run) return text('[DRY RUN] Would send pitch to ' + result.would_send_to);
+      return text('Pitch sent to contact #' + args.contact_id + ' (Gmail ID: ' + result.gmail_id + ')');
+    }
+  );
+
+  registerDual(server,
+    'studio_outreach_followup',
+    'Send a follow-up email to a contact whose pitch was sent but not replied to.',
+    {
+      contact_id: z.number().describe('Contact ID to follow up with'),
+      dry_run: z.boolean().optional().describe('If true (default), simulate without sending')
+    },
+    async (args) => {
+      var result = await apiPost('/outreach/followup/' + args.contact_id, { dry_run: args.dry_run !== false });
+      return text('Follow-up ' + (result.dry_run ? '[DRY RUN] ' : '') + 'for contact #' + args.contact_id + ' — status: ' + result.status);
     }
   );
 }
@@ -703,10 +958,28 @@ function formatOverview(data) {
 
   var aq = data.approval_queue || [];
   if (aq.length) {
-    lines.push('=== Approval Queue (' + aq.length + ') ===');
+    lines.push('=== Task Approval Queue (' + aq.length + ') ===');
     for (var q of aq) lines.push(formatTask(q));
     lines.push('');
   }
 
+  var ga = data.pending_approvals || [];
+  if (ga.length) {
+    lines.push('=== Gate Approvals (' + ga.length + ' pending) ===');
+    for (var g of ga) {
+      lines.push('#' + g.id + ' [' + g.action_type + '] ' + g.title +
+        ' (by ' + g.requested_by + ', ' + (g.project || '') + ')');
+    }
+    lines.push('');
+  }
+
   return lines.join('\n');
+}
+
+function formatContact(c) {
+  return '#' + c.id + ' [' + c.status + '] ' + c.name +
+    (c.outlet ? ' (' + c.outlet + ')' : '') +
+    (c.tier ? ' ' + c.tier : '') +
+    (c.email ? ' <' + c.email + '>' : '') +
+    ' — ' + c.type;
 }
