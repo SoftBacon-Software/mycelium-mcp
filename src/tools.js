@@ -540,6 +540,106 @@ export function registerTools(server) {
     }
   );
 
+  // ===== CONCEPTS =====
+
+  registerDual(server,
+    'studio_list_concepts',
+    'List shared concepts (characters, styles, rulesets, etc). Optionally filter by type.',
+    {
+      type: z.enum(['character', 'style', 'ruleset', 'library', 'brand', 'custom']).optional().describe('Filter by concept type')
+    },
+    async (args) => {
+      var qs = args.type ? '?type=' + encodeURIComponent(args.type) : '';
+      var concepts = await apiGet('/concepts' + qs);
+      if (!concepts.length) return text('No concepts found.');
+      var lines = ['=== Concepts (' + concepts.length + ') ==='];
+      for (var c of concepts) {
+        lines.push('#' + c.id + ' [' + c.type + '] ' + c.name +
+          (c.description ? ' — ' + c.description : ''));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_get_concept',
+    'Get a single concept by ID, including linked projects.',
+    {
+      concept_id: z.string().describe('Concept ID')
+    },
+    async (args) => {
+      var concept = await apiGet('/concepts/' + encodeURIComponent(args.concept_id));
+      var lines = [
+        'Concept #' + concept.id + ' [' + concept.type + ']',
+        'Name: ' + concept.name,
+        'Description: ' + (concept.description || '(none)')
+      ];
+      if (concept.data) {
+        lines.push('Data: ' + (typeof concept.data === 'string' ? concept.data : JSON.stringify(concept.data, null, 2)));
+      }
+      if (concept.projects && concept.projects.length) {
+        lines.push('');
+        lines.push('Linked projects:');
+        for (var p of concept.projects) {
+          lines.push('  - ' + (p.name || p.id || p));
+        }
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_create_concept',
+    'Create a new shared concept (character, style, ruleset, library, brand, or custom).',
+    {
+      name: z.string().describe('Concept name'),
+      type: z.enum(['character', 'style', 'ruleset', 'library', 'brand', 'custom']).describe('Concept type'),
+      description: z.string().optional().describe('Short description'),
+      data: z.string().optional().describe('JSON string of additional concept data')
+    },
+    async (args) => {
+      var body = { name: args.name, type: args.type };
+      if (args.description) body.description = args.description;
+      if (args.data) body.data = JSON.parse(args.data);
+      var result = await apiPost('/concepts', body);
+      return text('Created concept #' + result.id + ': ' + args.name + ' [' + args.type + ']');
+    }
+  );
+
+  registerDual(server,
+    'studio_update_concept',
+    'Update an existing concept (name, description, data, or type).',
+    {
+      concept_id: z.string().describe('Concept ID to update'),
+      name: z.string().optional().describe('New name'),
+      type: z.enum(['character', 'style', 'ruleset', 'library', 'brand', 'custom']).optional().describe('New type'),
+      description: z.string().optional().describe('New description'),
+      data: z.string().optional().describe('JSON string of updated concept data')
+    },
+    async (args) => {
+      var body = {};
+      if (args.name) body.name = args.name;
+      if (args.type) body.type = args.type;
+      if (args.description) body.description = args.description;
+      if (args.data) body.data = JSON.parse(args.data);
+      await apiPut('/concepts/' + encodeURIComponent(args.concept_id), body);
+      return text('Updated concept #' + args.concept_id);
+    }
+  );
+
+  registerDual(server,
+    'studio_link_concept',
+    'Link a concept to a project so it is shared across that project.',
+    {
+      concept_id: z.string().describe('Concept ID to link'),
+      project: z.string().describe('Project ID to link the concept to')
+    },
+    async (args) => {
+      await apiPost('/concepts/' + encodeURIComponent(args.concept_id) + '/link', { project: args.project });
+      return text('Linked concept #' + args.concept_id + ' to project ' + args.project);
+    }
+  );
+
   // ===== RAW API =====
 
   registerDual(server,
