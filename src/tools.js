@@ -1014,6 +1014,141 @@ export function registerTools(server) {
       return text('Follow-up ' + (result.dry_run ? '[DRY RUN] ' : '') + 'for contact #' + args.contact_id + ' — status: ' + result.status);
     }
   );
+
+  // ===== DRONES =====
+
+  registerDual(server,
+    'studio_list_drone_jobs',
+    'List drone jobs. Defaults to all non-cancelled jobs. Filter by status.',
+    {
+      status: z.string().optional().describe('Filter by status: pending, claimed, done, failed, cancelled'),
+      limit: z.number().optional().describe('Max results (default 20)')
+    },
+    async (args) => {
+      var params = [];
+      if (args.status) params.push('status=' + encodeURIComponent(args.status));
+      if (args.limit) params.push('limit=' + args.limit);
+      else params.push('limit=20');
+      var jobs = await apiGet('/drones/jobs' + (params.length ? '?' + params.join('&') : ''));
+      if (!jobs.length) return text('No drone jobs found.');
+      var lines = ['=== Drone Jobs (' + jobs.length + ') ==='];
+      for (var j of jobs) {
+        var line = '#' + j.id + ' [' + j.status + '] ' + j.title;
+        if (j.drone_id) line += ' (worker: ' + j.drone_id + ')';
+        line += ' [p' + j.priority + ']';
+        if (j.started_at) line += ' started ' + timeAgo(j.started_at);
+        if (j.completed_at) line += ' completed ' + timeAgo(j.completed_at);
+        if (j.error) line += '\n  ERROR: ' + j.error.substring(0, 200);
+        lines.push(line);
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_get_drone_job',
+    'Get full details for a specific drone job including command, input/result data, and error info.',
+    {
+      job_id: z.number().describe('Drone job ID')
+    },
+    async (args) => {
+      var job = await apiGet('/drones/jobs/' + args.job_id);
+      var lines = [
+        '=== Drone Job #' + job.id + ' ===',
+        'Title: ' + job.title,
+        'Status: ' + job.status,
+        'Priority: ' + job.priority,
+        'Requester: ' + job.requester,
+        'Worker: ' + (job.drone_id || 'unassigned'),
+        'Command: ' + job.command
+      ];
+      if (job.input_data && job.input_data !== '{}') {
+        try { lines.push('Input: ' + JSON.stringify(JSON.parse(job.input_data), null, 2)); }
+        catch { lines.push('Input: ' + job.input_data); }
+      }
+      if (job.started_at) lines.push('Started: ' + job.started_at + ' (' + timeAgo(job.started_at) + ')');
+      if (job.completed_at) lines.push('Completed: ' + job.completed_at + ' (' + timeAgo(job.completed_at) + ')');
+      if (job.error) lines.push('Error:\n' + job.error);
+      if (job.result_data && job.result_data !== '{}') {
+        try {
+          var rd = JSON.parse(job.result_data);
+          if (rd.stdout) lines.push('Stdout:\n' + rd.stdout.substring(0, 1000));
+          if (rd.stderr) lines.push('Stderr:\n' + rd.stderr.substring(0, 500));
+        } catch { lines.push('Result: ' + job.result_data.substring(0, 500)); }
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_queue_drone_job',
+    'Queue a new drone job for GPU/CPU workers to pick up.',
+    {
+      title: z.string().describe('Job title'),
+      command: z.string().describe('Shell command to execute on the drone'),
+      requires: z.array(z.string()).optional().describe('Required capabilities, e.g. ["gpu"]'),
+      priority: z.number().optional().describe('Priority (1=highest, default 5)'),
+      input_data: z.string().optional().describe('JSON string of metadata for the job')
+    },
+    async (args) => {
+      var body = { title: args.title, command: args.command };
+      if (args.requires) body.requires = args.requires;
+      if (args.priority) body.priority = args.priority;
+      if (args.input_data) body.input_data = args.input_data;
+      var result = await apiPost('/drones/jobs', body);
+      return text('Queued drone job #' + result.id + ': ' + args.title + '\nPriority: ' + (args.priority || 5) + ' | Requires: ' + JSON.stringify(args.requires || ['cpu']));
+    }
+  );
+
+  registerDual(server,
+    'studio_cancel_drone_job',
+    'Cancel a pending drone job.',
+    {
+      job_id: z.number().describe('Job ID to cancel')
+    },
+    async (args) => {
+      await apiPut('/drones/jobs/' + args.job_id, { status: 'cancelled' });
+      return text('Cancelled drone job #' + args.job_id);
+    }
+  );
+
+  registerDual(server,
+    'studio_list_drones',
+    'List registered drone workers and their status.',
+    {},
+    async () => {
+      var drones = await apiGet('/drones');
+      if (!drones.length) return text('No drone workers registered.');
+      var lines = ['=== Drone Workers (' + drones.length + ') ==='];
+      for (var d of drones) {
+        var statusIcon = d.status === 'online' ? '[ON]' : '[OFF]';
+        var caps = [];
+        try { caps = JSON.parse(d.capabilities); } catch {}
+        var line = statusIcon + ' ' + d.name + ' (' + d.id + ')';
+        if (caps.length) line += ' [' + caps.join(', ') + ']';
+        if (d.working_on) line += '\n  Working on: ' + d.working_on;
+        line += '\n  Last seen: ' + timeAgo(d.last_heartbeat);
+        lines.push(line);
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_list_artifacts',
+    'List uploaded drone artifacts (scripts, models, result zips).',
+    {},
+    async () => {
+      var artifacts = await apiGet('/drones/artifacts');
+      if (!artifacts.length) return text('No artifacts uploaded.');
+      var lines = ['=== Drone Artifacts (' + artifacts.length + ') ==='];
+      for (var a of artifacts) {
+        var size = a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.round(a.size / 1024) + ' KB';
+        lines.push(a.name + ' (' + size + ') — uploaded ' + timeAgo(a.uploaded));
+      }
+      return text(lines.join('\n'));
+    }
+  );
 }
 
 function formatOverview(data) {
@@ -1082,6 +1217,35 @@ function formatOverview(data) {
       lines.push('  ' + op.display_name + ' (' + op.id + ') - ' + op.role + (op.responsibilities ? ': ' + op.responsibilities : ''));
     }
     lines.push('');
+  }
+
+  // Drones
+  var drones = data.drones || [];
+  var droneJobs = data.drone_jobs || [];
+  if (drones.length || droneJobs.length) {
+    if (drones.length) {
+      lines.push('=== Drone Workers (' + drones.length + ') ===');
+      for (var d of drones) {
+        var dIcon = d.status === 'online' ? '[ON]' : '[OFF]';
+        lines.push(dIcon + ' ' + d.name + ' (' + d.id + ')' +
+          (d.working_on ? ' — ' + d.working_on : '') +
+          ' — last seen ' + timeAgo(d.last_heartbeat));
+      }
+      lines.push('');
+    }
+    if (droneJobs.length) {
+      var pending2 = droneJobs.filter(function (j) { return j.status === 'pending'; });
+      var claimed = droneJobs.filter(function (j) { return j.status === 'claimed'; });
+      var djDone = droneJobs.filter(function (j) { return j.status === 'done'; });
+      var djFailed = droneJobs.filter(function (j) { return j.status === 'failed'; });
+      lines.push('=== Drone Jobs: ' + pending2.length + ' pending, ' + claimed.length + ' running, ' +
+        djDone.length + ' done, ' + djFailed.length + ' failed ===');
+      for (var dj of droneJobs.filter(function (j) { return j.status !== 'done' && j.status !== 'cancelled'; })) {
+        lines.push('#' + dj.id + ' [' + dj.status + '] ' + dj.title +
+          (dj.drone_id ? ' (→ ' + dj.drone_id + ')' : ''));
+      }
+      lines.push('');
+    }
   }
 
   // Instance Config

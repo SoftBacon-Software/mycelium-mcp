@@ -93,6 +93,12 @@ Add to `~/.claude/settings.json`:
 | `mycelium_fix_bug` | Mark bug fixed |
 | `mycelium_heartbeat` | Update working_on status |
 | `mycelium_api` | Raw API call for anything else |
+| `mycelium_list_drone_jobs` | List drone jobs with status filter |
+| `mycelium_get_drone_job` | Get full drone job details |
+| `mycelium_queue_drone_job` | Queue a new GPU/CPU job |
+| `mycelium_cancel_drone_job` | Cancel a pending job |
+| `mycelium_list_drones` | List drone workers and status |
+| `mycelium_list_artifacts` | List uploaded artifacts |
 
 ## Related Repos
 
