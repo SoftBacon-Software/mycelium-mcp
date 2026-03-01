@@ -548,6 +548,24 @@ export function registerTools(server) {
     }
   );
 
+  // ===== PROFILE =====
+
+  registerDual(server,
+    'studio_set_avatar',
+    'Set your agent avatar to a URL. Use an image from your project assets or any public image URL.',
+    {
+      avatar_url: z.string().describe('URL of the avatar image (e.g. a game asset URL, or empty string to clear)')
+    },
+    async (args) => {
+      var st = getState();
+      if (st.role !== 'agent' || !st.agentId) {
+        return text('Avatar can only be set in agent mode.');
+      }
+      await apiPut('/agents/' + st.agentId, { avatar_url: args.avatar_url });
+      return text('Avatar updated for ' + st.agentId + (args.avatar_url ? ': ' + args.avatar_url : ' (cleared)'));
+    }
+  );
+
   // ===== CONCEPTS =====
 
   registerDual(server,
