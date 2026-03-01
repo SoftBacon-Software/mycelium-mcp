@@ -1,7 +1,7 @@
 // HTTP client for the Mycelium API (formerly Dioverse Studio API)
 // Accepts MYCELIUM_* env vars with DIOVERSE_* as fallback.
 
-const API_URL = process.env.MYCELIUM_API_URL || process.env.DIOVERSE_API_URL || 'https://willingsacrifice.com/api/mycelium';
+const API_URL = process.env.MYCELIUM_API_URL || process.env.DIOVERSE_API_URL || 'https://mycelium.fyi/api/mycelium';
 const API_KEY = process.env.MYCELIUM_API_KEY || process.env.DIOVERSE_API_KEY || '';
 const ROLE = process.env.MYCELIUM_ROLE || process.env.DIOVERSE_ROLE || 'admin';
 
