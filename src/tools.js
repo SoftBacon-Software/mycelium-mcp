@@ -120,6 +120,16 @@ export function registerTools(server) {
           lines.push('');
         }
 
+        // Pending directives (blocking)
+        if (data.pending_directives && data.pending_directives.length > 0) {
+          lines.push('BLOCKING DIRECTIVES (' + data.pending_directives.length + '):');
+          lines.push('You MUST respond to these before receiving work assignments.');
+          for (var dir of data.pending_directives) {
+            lines.push('  #' + dir.id + ' from ' + dir.from_agent + ': ' + (dir.content || '').substring(0, 200));
+          }
+          lines.push('');
+        }
+
         lines.push('=== Other Agents ===');
         for (var a of (data.other_agents || [])) lines.push(formatAgent(a));
 
@@ -763,6 +773,80 @@ export function registerTools(server) {
     }
   );
 
+  // ===== WORK ROUTING =====
+
+  registerDual(server, 'studio_request_work',
+    'Request work assignment from Claude Admin. Types: task_request, asset_request, work_request.',
+    {
+      type: { type: 'string', description: 'Request type: task_request, asset_request, work_request' },
+      description: { type: 'string', description: 'What work is needed' },
+      target: { type: 'string', description: 'Target agent (for cross-agent requests)' },
+      priority: { type: 'string', description: 'Priority: low, normal, high, urgent' }
+    },
+    async function (params) {
+      var res = await apiPost('/work/request', {
+        type: params.type,
+        target: params.target || '',
+        description: params.description || '',
+        priority: params.priority || 'normal'
+      });
+      return { content: [{ type: 'text', text: 'Work request filed. Message #' + res.message_id + ' routed to ' + res.routed_to + '.\nClaude Admin will review and assign work.' }] };
+    }
+  );
+
+  registerDual(server, 'studio_file_directive',
+    'Issue a blocking directive to an agent. Agent must respond before getting new work.',
+    {
+      to: { type: 'string', description: 'Target agent ID' },
+      content: { type: 'string', description: 'Directive content' },
+      game: { type: 'string', description: 'Project context' }
+    },
+    async function (params) {
+      var st = getState();
+      var res = await apiPost('/messages', {
+        from: st.agentId || '__admin__',
+        to: params.to,
+        msg_type: 'directive',
+        content: params.content,
+        game: params.game || ''
+      });
+      return { content: [{ type: 'text', text: 'Directive sent to ' + params.to + '. Message #' + res.id + '.\nAgent MUST respond before receiving new work assignments.' }] };
+    }
+  );
+
+  // ===== ASSETS =====
+
+  registerDual(server, 'studio_upload_asset',
+    'Mark an asset as ready and set its file path. For actual file upload, use dashboard or curl POST /assets/:id/upload.',
+    {
+      asset_id: { type: 'number', description: 'Asset ID to update' },
+      path: { type: 'string', description: 'File path or URL where asset is available' },
+      status: { type: 'string', description: 'New status (default: ready)' }
+    },
+    async function (params) {
+      var res = await apiPut('/assets/' + params.asset_id, {
+        status: params.status || 'ready',
+        path: params.path || ''
+      });
+      return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' updated. Status: ' + (params.status || 'ready') + '. Path: ' + (params.path || '(none)') }] };
+    }
+  );
+
+  registerDual(server, 'studio_download_asset',
+    'Get download info for a ready asset.',
+    {
+      asset_id: { type: 'number', description: 'Asset ID to check' }
+    },
+    async function (params) {
+      var res = await apiGet('/assets/' + params.asset_id);
+      if (res.status !== 'ready') {
+        return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' is not ready. Status: ' + res.status }] };
+      }
+      var url = res.download_url || res.path || '(no file attached)';
+      return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' (' + res.name + ') is ready.\nDownload: ' + url + '\nType: ' + res.type + '\nProject: ' + res.game }] };
+    }
+  );
+
   // ===== RAW API =====
 
   registerDual(server,
@@ -987,6 +1071,24 @@ function formatOverview(data) {
     for (var g of ga) {
       lines.push('#' + g.id + ' [' + g.action_type + '] ' + g.title +
         ' (by ' + g.requested_by + ', ' + (g.project || '') + ')');
+    }
+    lines.push('');
+  }
+
+  // Operators (team)
+  if (data.operators && data.operators.length > 0) {
+    lines.push('=== Team (' + data.operators.length + ') ===');
+    for (var op of data.operators) {
+      lines.push('  ' + op.display_name + ' (' + op.id + ') - ' + op.role + (op.responsibilities ? ': ' + op.responsibilities : ''));
+    }
+    lines.push('');
+  }
+
+  // Instance Config
+  if (data.instance_config && data.instance_config.length > 0) {
+    lines.push('=== Instance Config ===');
+    for (var cfg of data.instance_config) {
+      lines.push('  ' + cfg.key + ' = ' + cfg.value);
     }
     lines.push('');
   }

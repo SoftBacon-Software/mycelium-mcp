@@ -1,6 +1,6 @@
 // Session state and auto-heartbeat management
 
-import { apiPost } from './api.js';
+import { apiPost, apiPut } from './api.js';
 
 var state = {
   agentId: process.env.MYCELIUM_AGENT_ID || process.env.DIOVERSE_AGENT_ID || null,
@@ -53,6 +53,17 @@ export function stopHeartbeat() {
 export async function shutdown() {
   stopHeartbeat();
   if (state.role === 'agent' && state.agentId) {
+    // Auto-save session summary
+    try {
+      var sessionData = {
+        working_on: state.workingOn || '',
+        timestamp: new Date().toISOString()
+      };
+      await apiPut('/context/keys/' + state.agentId + '/last_session', {
+        value: JSON.stringify(sessionData)
+      });
+    } catch (e) { /* best effort */ }
+
     // Clear working_on on shutdown
     try {
       await apiPost('/agents/heartbeat', {
