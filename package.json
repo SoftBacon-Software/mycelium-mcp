@@ -1,0 +1,25 @@
+{
+  "name": "dioverse-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for the Dioverse Studio API — gives Claude agents native tools with auto-heartbeat and protocol enforcement",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "dioverse-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "mcp",
+    "dioverse",
+    "studio",
+    "claude"
+  ],
+  "author": "SoftBacon Software",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^4.3.6"
+  }
+}
