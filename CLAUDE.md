@@ -99,6 +99,9 @@ Add to `~/.claude/settings.json`:
 | `mycelium_cancel_drone_job` | Cancel a pending job |
 | `mycelium_list_drones` | List drone workers and status |
 | `mycelium_list_artifacts` | List uploaded artifacts |
+| `mycelium_leave_notes` | Leave handoff notes on agent's latest savepoint |
+| `mycelium_view_savepoint` | View agent's latest savepoint |
+| `mycelium_savepoint_diff` | Get changes since agent's last savepoint |
 
 ## Related Repos
 
