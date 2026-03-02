@@ -4,9 +4,15 @@
 const API_URL = process.env.MYCELIUM_API_URL || process.env.DIOVERSE_API_URL || 'https://mycelium.fyi/api/mycelium';
 const API_KEY = process.env.MYCELIUM_API_KEY || process.env.DIOVERSE_API_KEY || '';
 const ROLE = process.env.MYCELIUM_ROLE || process.env.DIOVERSE_ROLE || 'admin';
+const AGENT_ID = process.env.MYCELIUM_AGENT_ID || process.env.DIOVERSE_AGENT_ID || '';
 
 function authHeaders() {
-  if (ROLE === 'admin') return { 'X-Admin-Key': API_KEY };
+  if (ROLE === 'admin') {
+    var headers = { 'X-Admin-Key': API_KEY };
+    // Identify who is using the admin key so actions aren't attributed to __system__
+    if (AGENT_ID) headers['X-Acting-As'] = AGENT_ID;
+    return headers;
+  }
   return { 'X-Agent-Key': API_KEY };
 }
 
