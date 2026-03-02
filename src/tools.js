@@ -10,10 +10,27 @@ function text(s) {
 }
 
 // Register a tool under both mycelium_* (primary) and studio_* (alias) names
+// Wraps handler with error handling so failures return MCP error content instead of crashing
 function registerDual(server, studioName, description, schema, handler) {
   var myceliumName = studioName.replace(/^studio_/, 'mycelium_');
-  server.tool(myceliumName, description, schema, handler);
-  server.tool(studioName, description, schema, handler);
+  var safeHandler = async function(args) {
+    try {
+      return await handler(args);
+    } catch (err) {
+      var msg = err && err.message ? err.message : String(err);
+      return { content: [{ type: 'text', text: 'Error in ' + myceliumName + ': ' + msg }], isError: true };
+    }
+  };
+  server.tool(myceliumName, description, schema, safeHandler);
+  server.tool(studioName, description, schema, safeHandler);
+}
+
+// Safely parse a JSON string param, returning fallback on failure
+function safeParseJSON(str, fallback) {
+  if (!str) return fallback !== undefined ? fallback : {};
+  try { return JSON.parse(str); } catch (e) {
+    throw new Error('Invalid JSON: ' + e.message + ' — input: ' + str.substring(0, 100));
+  }
 }
 
 function timeAgo(iso) {
@@ -475,6 +492,66 @@ export function registerTools(server) {
     }
   );
 
+  // ===== PLAN CREATION =====
+
+  registerDual(server,
+    'studio_create_plan',
+    'Create a new plan with optional steps. Returns the created plan ID.',
+    {
+      title: z.string().describe('Plan title'),
+      description: z.string().describe('Plan description'),
+      project_id: z.string().describe('Project identifier'),
+      priority: z.enum(['low', 'normal', 'high']).optional().describe('Priority level'),
+      steps: z.array(z.object({
+        title: z.string(),
+        description: z.string().optional(),
+        assignee: z.string().optional()
+      })).optional().describe('Ordered list of plan steps to create')
+    },
+    async (args) => {
+      var st = getState();
+      var body = {
+        title: args.title,
+        description: args.description,
+        project_id: args.project_id,
+        priority: args.priority || 'normal',
+        owner: st.agentId || '__admin__'
+      };
+      if (args.steps) body.steps = args.steps;
+      var result = await apiPost('/plans', body);
+      var msg = 'Created plan #' + result.id + ': ' + args.title;
+      if (args.steps && args.steps.length) msg += ' (' + args.steps.length + ' steps)';
+      return text(msg);
+    }
+  );
+
+  // ===== BUG FILING =====
+
+  registerDual(server,
+    'studio_file_bug',
+    'File a new bug report.',
+    {
+      title: z.string().describe('Bug title'),
+      description: z.string().describe('Bug description with repro steps'),
+      project_id: z.string().describe('Project identifier'),
+      severity: z.enum(['low', 'normal', 'high', 'critical']).optional().describe('Severity level (default: normal)'),
+      category: z.string().optional().describe('Bug category (e.g. ui, api, data, other)')
+    },
+    async (args) => {
+      var st = getState();
+      var body = {
+        title: args.title,
+        description: args.description,
+        project_id: args.project_id,
+        severity: args.severity || 'normal',
+        category: args.category || 'other',
+        reporter: st.agentId || '__admin__'
+      };
+      var result = await apiPost('/bugs', body);
+      return text('Filed bug #' + result.id + ' [' + (args.severity || 'normal') + ']: ' + args.title);
+    }
+  );
+
   // ===== CONTEXT =====
 
   registerDual(server,
@@ -617,6 +694,101 @@ export function registerTools(server) {
     }
   );
 
+  // ===== ORGANIZATIONS =====
+
+  registerDual(server,
+    'studio_list_orgs',
+    'List organizations on the network.',
+    {},
+    async () => {
+      var orgs = await apiGet('/orgs');
+      if (!orgs.length) return text('No organizations found.');
+      var lines = ['=== Organizations (' + orgs.length + ') ==='];
+      for (var o of orgs) {
+        lines.push('#' + o.id + ' ' + o.name + (o.description ? ' — ' + o.description : ''));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_create_org',
+    'Create a new organization.',
+    {
+      name: z.string().describe('Organization name'),
+      description: z.string().optional().describe('Organization description')
+    },
+    async (args) => {
+      var body = { name: args.name };
+      if (args.description) body.description = args.description;
+      var result = await apiPost('/orgs', body);
+      return text('Created org #' + result.id + ': ' + args.name);
+    }
+  );
+
+  // ===== PROJECTS =====
+
+  registerDual(server,
+    'studio_list_projects',
+    'List projects on the network.',
+    {
+      org_id: z.number().optional().describe('Filter by organization ID')
+    },
+    async (args) => {
+      var params = [];
+      if (args.org_id) params.push('org_id=' + args.org_id);
+      var qs = params.length ? '?' + params.join('&') : '';
+      var projects = await apiGet('/projects' + qs);
+      if (!projects.length) return text('No projects found.');
+      var lines = ['=== Projects (' + projects.length + ') ==='];
+      for (var p of projects) {
+        lines.push(p.id + ' — ' + (p.name || p.id) +
+          (p.type ? ' [' + p.type + ']' : '') +
+          (p.description ? ': ' + p.description : ''));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_create_project',
+    'Create a new project.',
+    {
+      id: z.string().describe('Project identifier (slug, e.g. my-project)'),
+      name: z.string().describe('Display name'),
+      description: z.string().optional().describe('Project description'),
+      type: z.string().optional().describe('Project type (e.g. game, film, software, book)'),
+      org_id: z.number().optional().describe('Organization ID to link to')
+    },
+    async (args) => {
+      var body = { id: args.id, name: args.name };
+      if (args.description) body.description = args.description;
+      if (args.type) body.type = args.type;
+      if (args.org_id) body.org_id = args.org_id;
+      var result = await apiPost('/projects', body);
+      return text('Created project: ' + args.id + ' (' + args.name + ')');
+    }
+  );
+
+  registerDual(server,
+    'studio_update_project',
+    'Update an existing project.',
+    {
+      id: z.string().describe('Project identifier'),
+      name: z.string().optional().describe('New display name'),
+      description: z.string().optional().describe('New description'),
+      type: z.string().optional().describe('New project type')
+    },
+    async (args) => {
+      var body = {};
+      if (args.name) body.name = args.name;
+      if (args.description) body.description = args.description;
+      if (args.type) body.type = args.type;
+      await apiPut('/projects/' + encodeURIComponent(args.id), body);
+      return text('Updated project: ' + args.id);
+    }
+  );
+
   // ===== CONCEPTS =====
 
   registerDual(server,
@@ -677,7 +849,7 @@ export function registerTools(server) {
     async (args) => {
       var body = { name: args.name, type: args.type };
       if (args.description) body.description = args.description;
-      if (args.data) body.data = JSON.parse(args.data);
+      if (args.data) body.data = safeParseJSON(args.data);
       var result = await apiPost('/concepts', body);
       return text('Created concept #' + result.id + ': ' + args.name + ' [' + args.type + ']');
     }
@@ -698,7 +870,7 @@ export function registerTools(server) {
       if (args.name) body.name = args.name;
       if (args.type) body.type = args.type;
       if (args.description) body.description = args.description;
-      if (args.data) body.data = JSON.parse(args.data);
+      if (args.data) body.data = safeParseJSON(args.data);
       await apiPut('/concepts/' + encodeURIComponent(args.concept_id), body);
       return text('Updated concept #' + args.concept_id);
     }
@@ -714,6 +886,82 @@ export function registerTools(server) {
     async (args) => {
       await apiPost('/concepts/' + encodeURIComponent(args.concept_id) + '/link', { project: args.project });
       return text('Linked concept #' + args.concept_id + ' to project ' + args.project);
+    }
+  );
+
+  // ===== CHANNELS =====
+
+  registerDual(server,
+    'studio_list_channels',
+    'List chat channels on the network.',
+    {},
+    async () => {
+      var channels = await apiGet('/channels');
+      if (!channels.length) return text('No channels found.');
+      var lines = ['=== Channels (' + channels.length + ') ==='];
+      for (var ch of channels) {
+        lines.push('#' + ch.id + ' ' + ch.name + ' [' + ch.type + ']' +
+          (ch.description ? ' — ' + ch.description : ''));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_create_channel',
+    'Create a new chat channel.',
+    {
+      name: z.string().describe('Channel name (e.g. #project-updates)'),
+      type: z.enum(['general', 'announcement', 'project', 'agent']).optional().describe('Channel type (default: general)'),
+      description: z.string().optional().describe('Channel description')
+    },
+    async (args) => {
+      var st = getState();
+      var body = {
+        name: args.name,
+        type: args.type || 'general',
+        created_by: st.agentId || '__admin__'
+      };
+      if (args.description) body.description = args.description;
+      var result = await apiPost('/channels', body);
+      return text('Created channel #' + result.id + ': ' + args.name);
+    }
+  );
+
+  registerDual(server,
+    'studio_read_channel',
+    'Read messages from a specific channel.',
+    {
+      channel_id: z.number().describe('Channel ID to read'),
+      limit: z.number().optional().describe('Max messages to return (default 30)')
+    },
+    async (args) => {
+      var params = [];
+      if (args.limit) params.push('limit=' + args.limit);
+      var qs = params.length ? '?' + params.join('&') : '';
+      var messages = await apiGet('/channels/' + args.channel_id + '/messages' + qs);
+      if (!messages.length) return text('No messages in this channel.');
+      var lines = messages.map(formatMessage);
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_send_to_channel',
+    'Send a message to a specific channel.',
+    {
+      channel_id: z.number().describe('Channel ID to send to'),
+      content: z.string().describe('Message content')
+    },
+    async (args) => {
+      var st = getState();
+      var body = {
+        content: args.content,
+        from_agent: st.agentId || '__admin__',
+        channel_id: args.channel_id
+      };
+      var result = await apiPost('/messages', body);
+      return text('Message sent to channel #' + args.channel_id + ' (msg id: ' + result.id + ')');
     }
   );
 
@@ -735,7 +983,7 @@ export function registerTools(server) {
         action_type: args.action_type,
         requested_by: requester,
         title: args.title,
-        payload: args.payload ? JSON.parse(args.payload) : {},
+        payload: args.payload ? safeParseJSON(args.payload) : {},
         project: args.project || 'mycelium'
       });
       return text('Approval requested (id: ' + result.id + ')\nAction: ' + args.action_type + '\nTitle: ' + args.title + '\nStatus: pending — waiting for human approval in dashboard.\n\nPoll with studio_check_approval to check status.');
@@ -899,162 +1147,15 @@ export function registerTools(server) {
       body: z.string().optional().describe('JSON body string for POST/PUT')
     },
     async (args) => {
-      var parsed = args.body ? JSON.parse(args.body) : undefined;
+      var parsed = args.body ? safeParseJSON(args.body) : undefined;
       var fn = { GET: apiGet, POST: apiPost, PUT: apiPut, DELETE: apiDelete }[args.method];
       var result = await fn(args.path, parsed);
       return text(result);
     }
   );
 
-  // ===== OUTREACH =====
-
-  registerDual(server,
-    'studio_outreach_status',
-    'Get outreach pipeline status for a project — contact counts per status, active campaigns.',
-    { project: z.string().describe('Project ID (e.g. willing-sacrifice)') },
-    async (args) => {
-      var data = await apiGet('/outreach/status?project=' + encodeURIComponent(args.project));
-      var lines = ['=== Outreach Status: ' + args.project + ' ==='];
-      var counts = data.contact_counts || {};
-      for (var [status, count] of Object.entries(counts)) {
-        lines.push('  ' + status + ': ' + count);
-      }
-      lines.push('Active campaigns: ' + (data.active_campaigns || 0));
-      return text(lines.join('\n'));
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_contacts',
-    'List outreach contacts. Filter by project, status, type.',
-    {
-      project: z.string().optional().describe('Filter by project'),
-      status: z.string().optional().describe('Filter by status (discovered, researched, draft_ready, approved, sent, followed_up, replied, covered, closed)'),
-      type: z.string().optional().describe('Filter by type (creator, press)'),
-      limit: z.number().optional().describe('Max results (default 50)')
-    },
-    async (args) => {
-      var params = [];
-      if (args.project) params.push('project=' + encodeURIComponent(args.project));
-      if (args.status) params.push('status=' + encodeURIComponent(args.status));
-      if (args.type) params.push('type=' + encodeURIComponent(args.type));
-      if (args.limit) params.push('limit=' + args.limit);
-      var contacts = await apiGet('/outreach/contacts' + (params.length ? '?' + params.join('&') : ''));
-      if (!contacts.length) return text('No contacts found.');
-      var lines = ['=== Outreach Contacts (' + contacts.length + ') ==='];
-      for (var c of contacts) lines.push(formatContact(c));
-      return text(lines.join('\n'));
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_campaign',
-    'Create or update an outreach campaign for a project.',
-    {
-      action: z.enum(['create', 'update']).describe('create or update'),
-      project: z.string().optional().describe('Project ID (required for create)'),
-      name: z.string().optional().describe('Campaign name (required for create)'),
-      campaign_id: z.number().optional().describe('Campaign ID (required for update)'),
-      persona_prompt: z.string().optional().describe('System prompt for Claude pitch generation'),
-      project_facts: z.string().optional().describe('Project facts for Claude to reference'),
-      templates: z.string().optional().describe('JSON string of email templates'),
-      config: z.string().optional().describe('JSON string of campaign config (API keys, search queries, limits)')
-    },
-    async (args) => {
-      if (args.action === 'create') {
-        var body = { project: args.project, name: args.name };
-        if (args.persona_prompt) body.persona_prompt = args.persona_prompt;
-        if (args.project_facts) body.project_facts = args.project_facts;
-        if (args.templates) body.templates = args.templates;
-        if (args.config) body.config = args.config;
-        var result = await apiPost('/outreach/campaigns', body);
-        return text('Campaign created: #' + result.id + ' "' + result.name + '"');
-      } else {
-        var updateBody = {};
-        if (args.name) updateBody.name = args.name;
-        if (args.persona_prompt) updateBody.persona_prompt = args.persona_prompt;
-        if (args.project_facts) updateBody.project_facts = args.project_facts;
-        if (args.templates) updateBody.templates = args.templates;
-        if (args.config) updateBody.config = args.config;
-        await apiPut('/outreach/campaigns/' + args.campaign_id, updateBody);
-        return text('Campaign #' + args.campaign_id + ' updated.');
-      }
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_discover',
-    'Run contact discovery for a campaign — searches YouTube for creators and Hunter.io for press contacts.',
-    { campaign_id: z.number().describe('Campaign ID to run discovery for') },
-    async (args) => {
-      var result = await apiPost('/outreach/discover', { campaign_id: args.campaign_id });
-      return text('Discovery complete: ' + result.creators + ' creators, ' + result.press + ' press (' + result.total + ' total new contacts)');
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_research',
-    'Research a contact — fetch their latest YouTube video or press article.',
-    { contact_id: z.number().describe('Contact ID to research') },
-    async (args) => {
-      var result = await apiPost('/outreach/research/' + args.contact_id, {});
-      return text('Researched contact #' + args.contact_id + ': ' + JSON.stringify(result.updates || {}));
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_personalize',
-    'Generate a Claude-personalized pitch for a contact using their campaign persona and templates.',
-    { contact_id: z.number().describe('Contact ID to personalize pitch for') },
-    async (args) => {
-      var result = await apiPost('/outreach/personalize/' + args.contact_id, {});
-      return text('Pitch generated for contact #' + args.contact_id + '\nSubject: ' + result.subject + '\nPreview: ' + result.body_preview);
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_approve',
-    'Approve a draft pitch for sending. Optionally edit subject/body.',
-    {
-      contact_id: z.number().describe('Contact ID to approve'),
-      pitch_subject: z.string().optional().describe('Override subject (optional)'),
-      pitch_body: z.string().optional().describe('Override body (optional)')
-    },
-    async (args) => {
-      var body = {};
-      if (args.pitch_subject) body.pitch_subject = args.pitch_subject;
-      if (args.pitch_body) body.pitch_body = args.pitch_body;
-      await apiPut('/outreach/approve/' + args.contact_id, body);
-      return text('Contact #' + args.contact_id + ' approved for sending.');
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_send',
-    'Send an approved pitch to a contact via Gmail. Set dry_run=false to actually send.',
-    {
-      contact_id: z.number().describe('Contact ID to send pitch to'),
-      dry_run: z.boolean().optional().describe('If true (default), simulate without sending')
-    },
-    async (args) => {
-      var result = await apiPost('/outreach/send/' + args.contact_id, { dry_run: args.dry_run !== false });
-      if (result.dry_run) return text('[DRY RUN] Would send pitch to ' + result.would_send_to);
-      return text('Pitch sent to contact #' + args.contact_id + ' (Gmail ID: ' + result.gmail_id + ')');
-    }
-  );
-
-  registerDual(server,
-    'studio_outreach_followup',
-    'Send a follow-up email to a contact whose pitch was sent but not replied to.',
-    {
-      contact_id: z.number().describe('Contact ID to follow up with'),
-      dry_run: z.boolean().optional().describe('If true (default), simulate without sending')
-    },
-    async (args) => {
-      var result = await apiPost('/outreach/followup/' + args.contact_id, { dry_run: args.dry_run !== false });
-      return text('Follow-up ' + (result.dry_run ? '[DRY RUN] ' : '') + 'for contact #' + args.contact_id + ' — status: ' + result.status);
-    }
-  );
+  // ===== PLUGIN TOOLS (auto-discovered, see registerPluginTools) =====
+  // Outreach, video-pipeline, and steam-assets tools are registered dynamically on boot.
 
   // ===== SAVEPOINTS =====
 
@@ -1377,4 +1478,149 @@ function formatContact(c) {
     (c.tier ? ' ' + c.tier : '') +
     (c.email ? ' <' + c.email + '>' : '') +
     ' — ' + c.type;
+}
+
+// ===== PLUGIN AUTO-DISCOVERY =====
+
+// Convert a plugin tool schema field to a Zod type
+function fieldToZod(field) {
+  var base;
+  if (field.enum) {
+    base = z.enum(field.enum);
+  } else if (field.type === 'number' || field.type === 'integer') {
+    base = z.number();
+  } else if (field.type === 'boolean') {
+    base = z.boolean();
+  } else if (field.type === 'array') {
+    var itemZod = field.items ? fieldToZod(field.items) : z.any();
+    base = z.array(itemZod);
+  } else if (field.type === 'object') {
+    if (field.properties) {
+      base = jsonSchemaObjectToZod(field);
+    } else {
+      base = z.record(z.any());
+    }
+  } else {
+    base = z.string();
+  }
+  if (field.description) base = base.describe(field.description);
+  return base;
+}
+
+// Convert a JSON Schema object with properties to a Zod object
+function jsonSchemaObjectToZod(schema) {
+  var shape = {};
+  var props = schema.properties || {};
+  var required = schema.required || [];
+  for (var [key, field] of Object.entries(props)) {
+    var zodField = fieldToZod(field);
+    if (!required.includes(key)) zodField = zodField.optional();
+    shape[key] = zodField;
+  }
+  return z.object(shape);
+}
+
+// Convert a plugin tool schema (flat or nested JSON Schema) to a Zod shape object
+function pluginSchemaToZod(schema) {
+  if (!schema || Object.keys(schema).length === 0) return {};
+
+  // Nested JSON Schema format (has "type": "object" at top level)
+  if (schema.type === 'object' && schema.properties) {
+    var shape = {};
+    var required = schema.required || [];
+    for (var [key, field] of Object.entries(schema.properties)) {
+      var zodField = fieldToZod(field);
+      if (!required.includes(key)) zodField = zodField.optional();
+      shape[key] = zodField;
+    }
+    return shape;
+  }
+
+  // Flat key-value format (outreach-style: { key: { type, description, required, enum } })
+  var flat = {};
+  for (var [key, field] of Object.entries(schema)) {
+    var zodField = fieldToZod(field);
+    if (!field.required) zodField = zodField.optional();
+    flat[key] = zodField;
+  }
+  return flat;
+}
+
+// Build the API path, substituting {param} and :param placeholders from args
+function buildPath(pathTemplate, args) {
+  return pathTemplate.replace(/\{(\w+)\}|:(\w+)/g, function (_, a, b) {
+    var key = a || b;
+    return encodeURIComponent(args[key] || '');
+  });
+}
+
+// Build a handler function for a plugin tool based on its endpoint config
+function buildPluginHandler(endpoint) {
+  var method = (endpoint.method || 'GET').toUpperCase();
+  var pathTemplate = endpoint.path;
+  var queryMap = endpoint.queryMap || {};
+  var bodyMap = endpoint.bodyMap || {};
+
+  return async function (args) {
+    var path = buildPath(pathTemplate, args);
+
+    if (method === 'GET') {
+      var params = [];
+      for (var [argKey, queryKey] of Object.entries(queryMap)) {
+        if (args[argKey] !== undefined && args[argKey] !== null) {
+          params.push(queryKey + '=' + encodeURIComponent(args[argKey]));
+        }
+      }
+      var url = path + (params.length ? '?' + params.join('&') : '');
+      var result = await apiGet(url);
+      return text(result);
+    }
+
+    // POST / PUT / DELETE — build request body
+    var body = {};
+    if (Object.keys(bodyMap).length > 0) {
+      for (var [argKey, bodyKey] of Object.entries(bodyMap)) {
+        if (args[argKey] !== undefined) body[bodyKey] = args[argKey];
+      }
+    } else {
+      // No bodyMap — pass all args except path params as body
+      var pathParams = new Set();
+      pathTemplate.replace(/\{(\w+)\}|:(\w+)/g, function (_, a, b) { pathParams.add(a || b); });
+      for (var [key, val] of Object.entries(args)) {
+        if (!pathParams.has(key) && val !== undefined) body[key] = val;
+      }
+    }
+
+    var fn = { POST: apiPost, PUT: apiPut, DELETE: apiDelete }[method];
+    if (!fn) throw new Error('Unsupported HTTP method: ' + method);
+    var result = await fn(path, body);
+    return text(result);
+  };
+}
+
+// Fetch plugin MCP tools from the server and register them dynamically
+export async function registerPluginTools(server) {
+  try {
+    var tools = await apiGet('/plugins/mcp-tools');
+    if (!Array.isArray(tools) || tools.length === 0) {
+      process.stderr.write('Plugin discovery: no tools returned\n');
+      return 0;
+    }
+    var count = 0;
+    for (var tool of tools) {
+      try {
+        var schema = pluginSchemaToZod(tool.schema);
+        var handler = buildPluginHandler(tool.endpoint);
+        registerDual(server, tool.name, tool.description, schema, handler);
+        count++;
+      } catch (err) {
+        process.stderr.write('Plugin tool registration failed for ' + tool.name + ': ' + err.message + '\n');
+      }
+    }
+    process.stderr.write('Plugin discovery: registered ' + count + ' tools from ' + tools.length + ' definitions\n');
+    return count;
+  } catch (err) {
+    process.stderr.write('Plugin discovery failed: ' + err.message + '\n');
+    return 0;
+  }
 }

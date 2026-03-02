@@ -6,7 +6,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { registerTools } from './src/tools.js';
+import { registerTools, registerPluginTools } from './src/tools.js';
 import { shutdown } from './src/state.js';
 
 var role = process.env.MYCELIUM_ROLE || 'admin';
@@ -29,6 +29,7 @@ var server = new McpServer({
 });
 
 registerTools(server);
+await registerPluginTools(server);
 
 // Clean shutdown
 process.on('SIGINT', async () => { await shutdown(); process.exit(0); });
