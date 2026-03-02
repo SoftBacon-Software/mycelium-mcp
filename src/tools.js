@@ -1,4 +1,4 @@
-// All MCP tool registrations for the Mycelium API (formerly Dioverse Studio)
+// All MCP tool registrations for the Mycelium API
 // Tools are registered as mycelium_* (primary) with studio_* aliases.
 
 import { z } from 'zod';
@@ -27,8 +27,7 @@ function timeAgo(iso) {
 
 function formatAgent(a) {
   var line = (a.status === 'online' ? '[ON] ' : '[OFF] ') + a.name + ' (' + a.id + ')';
-  if (a.project) line += ' — ' + a.project;
-  else if (a.game) line += ' — ' + a.game;
+  if (a.project_id) line += ' — ' + a.project_id;
   if (a.working_on) line += '\n  Working on: ' + a.working_on;
   line += '\n  Heartbeat: ' + timeAgo(a.last_heartbeat);
   return line;
@@ -48,7 +47,7 @@ function formatMessage(m) {
 }
 
 function formatBug(b) {
-  var proj = b.project || b.game;
+  var proj = b.project_id;
   return '#' + b.id + ' [' + b.severity + '] ' + b.title +
     ' (' + proj + ', ' + b.status + ')' +
     (b.assignee ? ' → ' + b.assignee : '');
@@ -79,7 +78,7 @@ export function registerTools(server) {
         var data = await apiGet('/boot/' + st.agentId);
         setBooted(data);
         startHeartbeat();
-        var proj = data.agent.project || data.agent.game;
+        var proj = data.agent.project_id;
         var lines = ['Booted as ' + st.agentId + ' (' + proj + ')', ''];
 
         if (data.tasks.length) {
@@ -311,7 +310,7 @@ export function registerTools(server) {
     {
       title: z.string().describe('Task title'),
       description: z.string().describe('Task description'),
-      game: z.string().describe('Project: willing-sacrifice, king-city, or dioverse'),
+      project_id: z.string().describe('Project identifier'),
       priority: z.enum(['low', 'normal', 'high']).optional().describe('Priority level'),
       assignee: z.string().optional().describe('Agent ID to assign to'),
       needs_approval: z.boolean().optional().describe('Whether task needs admin approval before work starts')
@@ -321,7 +320,7 @@ export function registerTools(server) {
       var body = {
         title: args.title,
         description: args.description,
-        game: args.game,
+        project_id: args.project_id,
         priority: args.priority || 'normal',
         requester: st.agentId || '__admin__'
       };
@@ -340,7 +339,7 @@ export function registerTools(server) {
     {
       content: z.string().describe('Message content'),
       to: z.string().optional().describe('Agent ID to send to (omit for broadcast)'),
-      game: z.string().optional().describe('Project context')
+      project_id: z.string().optional().describe('Project context')
     },
     async (args) => {
       var st = getState();
@@ -349,7 +348,7 @@ export function registerTools(server) {
         from_agent: st.agentId || '__admin__'
       };
       if (args.to) body.to_agent = args.to;
-      if (args.game) body.game = args.game;
+      if (args.project_id) body.project_id = args.project_id;
       var result = await apiPost('/messages', body);
       return text('Message sent (id: ' + result.id + ') to ' + (args.to || 'all'));
     }
@@ -362,7 +361,7 @@ export function registerTools(server) {
       content: z.string().describe('What you need from them'),
       to: z.string().describe('Agent ID to request from'),
       auto_task: z.boolean().optional().describe('Auto-create a task for this request'),
-      game: z.string().optional().describe('Project context')
+      project_id: z.string().optional().describe('Project context')
     },
     async (args) => {
       var st = getState();
@@ -372,7 +371,7 @@ export function registerTools(server) {
         from_agent: st.agentId || '__admin__'
       };
       if (args.auto_task) body.auto_task = true;
-      if (args.game) body.game = args.game;
+      if (args.project_id) body.project_id = args.project_id;
       var result = await apiPost('/requests', body);
       return text('Request sent (id: ' + result.id + ') to ' + args.to +
         (result.task_id ? '\nAuto-created task #' + result.task_id : ''));
@@ -419,12 +418,12 @@ export function registerTools(server) {
     'studio_check_plans',
     'View active plans and their steps.',
     {
-      game: z.string().optional().describe('Filter by project'),
+      project_id: z.string().optional().describe('Filter by project'),
       status: z.string().optional().describe('Filter by status (default: active)')
     },
     async (args) => {
       var params = [];
-      if (args.game) params.push('game=' + encodeURIComponent(args.game));
+      if (args.project_id) params.push('project_id=' + encodeURIComponent(args.project_id));
       params.push('status=' + (args.status || 'active'));
       var plans = await apiGet('/plans?' + params.join('&'));
       if (!plans.length) return text('No plans found.');
@@ -503,12 +502,12 @@ export function registerTools(server) {
     'studio_list_bugs',
     'List bug reports.',
     {
-      game: z.string().optional().describe('Filter by project'),
+      project_id: z.string().optional().describe('Filter by project'),
       status: z.string().optional().describe('Filter by status: open, in_progress, fixed, closed')
     },
     async (args) => {
       var params = [];
-      if (args.game) params.push('game=' + encodeURIComponent(args.game));
+      if (args.project_id) params.push('project_id=' + encodeURIComponent(args.project_id));
       if (args.status) params.push('status=' + encodeURIComponent(args.status));
       var qs = params.length ? '?' + params.join('&') : '';
       var bugs = await apiGet('/bugs' + qs);
@@ -592,7 +591,7 @@ export function registerTools(server) {
     'studio_set_avatar',
     'Set your agent avatar to a URL. Use an image from your project assets or any public image URL.',
     {
-      avatar_url: z.string().describe('URL of the avatar image (e.g. a game asset URL, or empty string to clear)')
+      avatar_url: z.string().describe('URL of the avatar image (or empty string to clear)')
     },
     async (args) => {
       var st = getState();
@@ -827,7 +826,7 @@ export function registerTools(server) {
     {
       to: { type: 'string', description: 'Target agent ID' },
       content: { type: 'string', description: 'Directive content' },
-      game: { type: 'string', description: 'Project context' }
+      project_id: { type: 'string', description: 'Project context' }
     },
     async function (params) {
       var st = getState();
@@ -836,7 +835,7 @@ export function registerTools(server) {
         to: params.to,
         msg_type: 'directive',
         content: params.content,
-        game: params.game || ''
+        project_id: params.project_id || ''
       });
       return { content: [{ type: 'text', text: 'Directive sent to ' + params.to + '. Message #' + res.id + '.\nAgent MUST respond before receiving new work assignments.' }] };
     }
@@ -871,7 +870,7 @@ export function registerTools(server) {
         return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' is not ready. Status: ' + res.status }] };
       }
       var url = res.download_url || res.path || '(no file attached)';
-      return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' (' + res.name + ') is ready.\nDownload: ' + url + '\nType: ' + res.type + '\nProject: ' + res.game }] };
+      return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' (' + res.name + ') is ready.\nDownload: ' + url + '\nType: ' + res.type + '\nProject: ' + res.project_id }] };
     }
   );
 
@@ -943,7 +942,7 @@ export function registerTools(server) {
       name: z.string().optional().describe('Campaign name (required for create)'),
       campaign_id: z.number().optional().describe('Campaign ID (required for update)'),
       persona_prompt: z.string().optional().describe('System prompt for Claude pitch generation'),
-      game_facts: z.string().optional().describe('Game facts for Claude to reference'),
+      project_facts: z.string().optional().describe('Project facts for Claude to reference'),
       templates: z.string().optional().describe('JSON string of email templates'),
       config: z.string().optional().describe('JSON string of campaign config (API keys, search queries, limits)')
     },
@@ -951,7 +950,7 @@ export function registerTools(server) {
       if (args.action === 'create') {
         var body = { project: args.project, name: args.name };
         if (args.persona_prompt) body.persona_prompt = args.persona_prompt;
-        if (args.game_facts) body.game_facts = args.game_facts;
+        if (args.project_facts) body.project_facts = args.project_facts;
         if (args.templates) body.templates = args.templates;
         if (args.config) body.config = args.config;
         var result = await apiPost('/outreach/campaigns', body);
@@ -960,7 +959,7 @@ export function registerTools(server) {
         var updateBody = {};
         if (args.name) updateBody.name = args.name;
         if (args.persona_prompt) updateBody.persona_prompt = args.persona_prompt;
-        if (args.game_facts) updateBody.game_facts = args.game_facts;
+        if (args.project_facts) updateBody.project_facts = args.project_facts;
         if (args.templates) updateBody.templates = args.templates;
         if (args.config) updateBody.config = args.config;
         await apiPut('/outreach/campaigns/' + args.campaign_id, updateBody);

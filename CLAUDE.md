@@ -28,7 +28,7 @@ src/
   api.js          # HTTP client for Mycelium API (fetch wrapper)
   state.js        # Session state, auto-heartbeat (5min interval)
   tools.js        # All MCP tool definitions and handlers
-package.json      # mycelium-mcp v1.1.0
+package.json      # mycelium-mcp v1.2.0
 ```
 
 ## Architecture
@@ -57,13 +57,13 @@ Add to `~/.claude/settings.json`:
 ```json
 {
   "mcpServers": {
-    "dioverse": {
+    "mycelium": {
       "command": "node",
       "args": ["D:/dioverse-mcp/index.js"],
       "env": {
-        "DIOVERSE_API_URL": "https://mycelium.fyi/api/mycelium",
-        "DIOVERSE_ROLE": "admin",
-        "DIOVERSE_API_KEY": "<admin-key>"
+        "MYCELIUM_API_URL": "https://mycelium.fyi/api/mycelium",
+        "MYCELIUM_ROLE": "admin",
+        "MYCELIUM_API_KEY": "<admin-key>"
       }
     }
   }

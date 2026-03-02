@@ -1,6 +1,6 @@
 {
   "name": "mycelium-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Mycelium MCP server — gives Claude agents native tools with auto-heartbeat and protocol enforcement for the Mycelium platform",
   "type": "module",
   "main": "index.js",
@@ -13,9 +13,8 @@
   "keywords": [
     "mcp",
     "mycelium",
-    "dioverse",
-    "studio",
-    "claude"
+    "ai-agents",
+    "distributed-development"
   ],
   "author": "SoftBacon Software",
   "license": "MIT",
