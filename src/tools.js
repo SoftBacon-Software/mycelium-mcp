@@ -133,6 +133,28 @@ export function registerTools(server) {
         lines.push('=== Other Agents ===');
         for (var a of (data.other_agents || [])) lines.push(formatAgent(a));
 
+        // Savepoint diff
+        if (data.savepoint && data.savepoint.has_savepoint) {
+          var sp = data.savepoint;
+          lines.push('');
+          lines.push('=== Session Resume (savepoint ' + sp.savepoint_at + ') ===');
+          lines.push('Last session: ' + (sp.was_working_on || 'idle'));
+          if (sp.notes) lines.push('*** NOTES FROM ADMIN: ' + sp.notes + ' ***');
+          var s = sp.summary;
+          var changes = [];
+          if (s.messages > 0) changes.push(s.messages + ' new msgs');
+          if (s.tasks > 0) changes.push(s.tasks + ' tasks changed');
+          if (s.context > 0) changes.push(s.context + ' context updates');
+          if (s.plans > 0) changes.push(s.plans + ' plan updates');
+          if (s.bugs > 0) changes.push(s.bugs + ' bug updates');
+          if (s.drone_jobs > 0) changes.push(s.drone_jobs + ' drone job updates');
+          if (changes.length) lines.push('Changes since: ' + changes.join(', '));
+          else lines.push('No changes since last session.');
+        } else {
+          lines.push('');
+          lines.push('First boot — no previous savepoint.');
+        }
+
         lines.push('', 'Auto-heartbeat started (every 5m). Server time: ' + data.server_time);
         return text(lines.join('\n'));
       }
@@ -544,15 +566,21 @@ export function registerTools(server) {
 
   registerDual(server,
     'studio_heartbeat',
-    'Manually update your working_on status and send a heartbeat.',
+    'Manually update your working_on status and send a heartbeat. Optionally include messages_acked and state_snapshot for savepoint.',
     {
-      working_on: z.string().describe('What you are currently working on (empty string to clear)')
+      working_on: z.string().describe('What you are currently working on (empty string to clear)'),
+      messages_acked: z.array(z.number()).optional().describe('Message IDs you have read this session'),
+      state_snapshot: z.string().optional().describe('JSON snapshot of custom session state to persist')
     },
     async (args) => {
       setWorkingOn(args.working_on);
       if (getState().role === 'agent') {
-        await sendHeartbeat();
-        return text('Heartbeat sent. working_on: "' + args.working_on + '"');
+        // Send heartbeat with savepoint data
+        var body = { status: 'online', working_on: args.working_on };
+        if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
+        if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
+        await apiPost('/agents/heartbeat', body);
+        return text('Heartbeat sent with savepoint. working_on: "' + args.working_on + '"');
       }
       return text('working_on set locally: "' + args.working_on + '" (admin mode — no heartbeat sent)');
     }
@@ -1012,6 +1040,76 @@ export function registerTools(server) {
     async (args) => {
       var result = await apiPost('/outreach/followup/' + args.contact_id, { dry_run: args.dry_run !== false });
       return text('Follow-up ' + (result.dry_run ? '[DRY RUN] ' : '') + 'for contact #' + args.contact_id + ' — status: ' + result.status);
+    }
+  );
+
+  // ===== SAVEPOINTS =====
+
+  registerDual(server,
+    'studio_leave_notes',
+    'Leave notes on an agent\'s latest savepoint. The agent will see these notes on their next boot. Use for handoff instructions, context, or "hey I fixed X, don\'t redo it".',
+    {
+      agent_id: z.string().describe('Agent ID to leave notes for'),
+      notes: z.string().describe('Notes text — the agent will see this on next boot')
+    },
+    async (args) => {
+      var result = await apiPut('/agents/' + args.agent_id + '/savepoint/notes', { notes: args.notes });
+      return text('Notes saved for ' + args.agent_id + ' (savepoint #' + result.savepoint_id + ').\nThey will see this on next boot.');
+    }
+  );
+
+  registerDual(server,
+    'studio_view_savepoint',
+    'View an agent\'s latest savepoint — see what they were working on, their session state, and any notes.',
+    {
+      agent_id: z.string().describe('Agent ID to view savepoint for')
+    },
+    async (args) => {
+      var sp = await apiGet('/agents/' + args.agent_id + '/savepoint');
+      if (!sp.has_savepoint && !sp.id) return text('No savepoint found for ' + args.agent_id);
+      var lines = [
+        '=== Savepoint for ' + args.agent_id + ' ===',
+        'Last heartbeat: ' + (sp.heartbeat_at || 'unknown'),
+        'Session: ' + (sp.session_id || 'none'),
+        'Working on: ' + (sp.working_on || 'nothing')
+      ];
+      if (sp.notes) lines.push('Notes: ' + sp.notes);
+      if (sp.state_snapshot && sp.state_snapshot !== '{}') {
+        try { lines.push('State: ' + JSON.stringify(JSON.parse(sp.state_snapshot), null, 2)); }
+        catch { lines.push('State: ' + sp.state_snapshot); }
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_savepoint_diff',
+    'Get what changed since an agent\'s last savepoint — new messages, task changes, context updates, etc.',
+    {
+      agent_id: z.string().describe('Agent ID to check diff for')
+    },
+    async (args) => {
+      var diff = await apiGet('/agents/' + args.agent_id + '/savepoint/diff');
+      if (!diff.has_savepoint) return text('No savepoint found for ' + args.agent_id + ' — first session.');
+      var lines = [
+        '=== Changes since savepoint (' + diff.savepoint_at + ') ===',
+        'Was working on: ' + (diff.was_working_on || 'nothing')
+      ];
+      if (diff.notes) lines.push('NOTES FROM ADMIN: ' + diff.notes);
+      var s = diff.summary;
+      lines.push('');
+      lines.push('Changes:');
+      if (s.messages > 0) lines.push('  ' + s.messages + ' new messages');
+      if (s.tasks > 0) lines.push('  ' + s.tasks + ' tasks changed');
+      if (s.context > 0) lines.push('  ' + s.context + ' context keys updated');
+      if (s.plans > 0) lines.push('  ' + s.plans + ' plans changed');
+      if (s.bugs > 0) lines.push('  ' + s.bugs + ' bugs changed');
+      if (s.drone_jobs > 0) lines.push('  ' + s.drone_jobs + ' drone jobs changed');
+      if (s.events > 0) lines.push('  ' + s.events + ' events since');
+      if (s.messages === 0 && s.tasks === 0 && s.context === 0 && s.plans === 0 && s.bugs === 0 && s.drone_jobs === 0) {
+        lines.push('  No changes detected.');
+      }
+      return text(lines.join('\n'));
     }
   );
 

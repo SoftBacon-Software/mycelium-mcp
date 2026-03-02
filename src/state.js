@@ -8,7 +8,10 @@ var state = {
   workingOn: '',
   booted: false,
   heartbeatTimer: null,
-  bootData: null
+  bootData: null,
+  messagesAcked: [],
+  sessionId: null,
+  customState: {}
 };
 
 export function getState() { return state; }
@@ -20,6 +23,29 @@ export function setWorkingOn(text) {
 export function setBooted(bootData) {
   state.booted = true;
   state.bootData = bootData;
+  // Generate session ID on first boot
+  if (!state.sessionId) {
+    state.sessionId = state.agentId + '-' + Date.now().toString(36);
+  }
+  // Track message IDs from boot data
+  if (bootData.new_messages) {
+    for (var m of bootData.new_messages) {
+      if (state.messagesAcked.indexOf(m.id) === -1) state.messagesAcked.push(m.id);
+    }
+  }
+  if (bootData.pending_requests) {
+    for (var r of bootData.pending_requests) {
+      if (state.messagesAcked.indexOf(r.id) === -1) state.messagesAcked.push(r.id);
+    }
+  }
+}
+
+export function ackMessage(messageId) {
+  if (state.messagesAcked.indexOf(messageId) === -1) state.messagesAcked.push(messageId);
+}
+
+export function setCustomState(key, value) {
+  state.customState[key] = value;
 }
 
 export async function sendHeartbeat() {
@@ -27,7 +53,10 @@ export async function sendHeartbeat() {
   try {
     await apiPost('/agents/heartbeat', {
       status: 'online',
-      working_on: state.workingOn
+      working_on: state.workingOn,
+      session_id: state.sessionId,
+      messages_acked: JSON.stringify(state.messagesAcked),
+      state_snapshot: JSON.stringify(state.customState)
     });
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
