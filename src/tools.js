@@ -81,9 +81,56 @@ export function registerTools(server) {
         var proj = data.agent.project_id;
         var lines = ['Booted as ' + st.agentId + ' (' + proj + ')', ''];
 
-        if (data.tasks.length) {
-          lines.push('=== My Tasks (' + data.tasks.length + ') ===');
-          for (var t of data.tasks) lines.push(formatTask(t));
+        // Role contract — who am I and what do I do?
+        if (data.role_contract) {
+          var rc = data.role_contract;
+          lines.push('=== Role Contract ===');
+          lines.push('Role: ' + rc.role + (rc.llm_backend ? ' (' + rc.llm_backend + '/' + (rc.llm_model || '?') + ')' : ''));
+          if (rc.description) lines.push('Description: ' + rc.description);
+          if (rc.responsibilities && rc.responsibilities.length) {
+            lines.push('Responsibilities:');
+            for (var resp of rc.responsibilities) lines.push('  - ' + resp);
+          }
+          if (rc.constraints && rc.constraints.length) {
+            lines.push('Constraints:');
+            for (var con of rc.constraints) lines.push('  - ' + con);
+          }
+          if (rc.capabilities && rc.capabilities.length) lines.push('Capabilities: ' + rc.capabilities.join(', '));
+          if (rc.guidelines) lines.push('Guidelines: ' + (rc.guidelines.length > 300 ? rc.guidelines.substring(0, 300) + '...' : rc.guidelines));
+          lines.push('');
+        }
+
+        // Project info
+        if (data.project) {
+          lines.push('=== Project ===');
+          lines.push(data.project.name + (data.project.type ? ' [' + data.project.type + ']' : '') + ': ' + (data.project.description || 'No description'));
+          lines.push('');
+        }
+
+        // Prioritized work queue — what should I do next?
+        if (data.work_queue && data.work_queue.length) {
+          lines.push('=== Work Queue (' + data.work_queue.length + ' items) ===');
+          var typeLabels = { directive: 'DIRECTIVE', request: 'REQUEST', plan_step: 'PLAN STEP', task: 'TASK', bug: 'BUG', plan_step_unassigned: 'PLAN STEP (unclaimed)', bug_unassigned: 'BUG (unclaimed)' };
+          for (var i = 0; i < Math.min(data.work_queue.length, 15); i++) {
+            var item = data.work_queue[i];
+            var label = typeLabels[item.type] || item.type;
+            var line = (i + 1) + '. [' + label + '] #' + item.id;
+            if (item.plan_title) line += ' (' + item.plan_title + ')';
+            line += ': ' + item.title;
+            if (item.status) line += ' [' + item.status + ']';
+            lines.push(line);
+          }
+          if (data.work_queue.length > 15) lines.push('... and ' + (data.work_queue.length - 15) + ' more');
+          lines.push('');
+        }
+
+        // Pending directives (blocking — repeat for emphasis)
+        if (data.pending_directives && data.pending_directives.length > 0) {
+          lines.push('*** BLOCKING DIRECTIVES (' + data.pending_directives.length + ') ***');
+          lines.push('You MUST respond to these before receiving work assignments.');
+          for (var dir of data.pending_directives) {
+            lines.push('  #' + dir.id + ' from ' + dir.from_agent + ': ' + (dir.content || '').substring(0, 200));
+          }
           lines.push('');
         }
 
@@ -115,16 +162,6 @@ export function registerTools(server) {
           lines.push('=== My Pending Approvals (' + data.my_approvals.length + ') ===');
           for (var ap of data.my_approvals) {
             lines.push('#' + ap.id + ' [' + ap.status + '] ' + ap.action_type + ': ' + ap.title);
-          }
-          lines.push('');
-        }
-
-        // Pending directives (blocking)
-        if (data.pending_directives && data.pending_directives.length > 0) {
-          lines.push('BLOCKING DIRECTIVES (' + data.pending_directives.length + '):');
-          lines.push('You MUST respond to these before receiving work assignments.');
-          for (var dir of data.pending_directives) {
-            lines.push('  #' + dir.id + ' from ' + dir.from_agent + ': ' + (dir.content || '').substring(0, 200));
           }
           lines.push('');
         }
@@ -178,7 +215,7 @@ export function registerTools(server) {
 
   registerDual(server,
     'studio_get_work',
-    'Get prioritized work list: plan steps first, then assigned tasks, then open bugs. Use this to figure out what to work on next.',
+    'Get prioritized work queue: directives > requests > plan steps > tasks > bugs. Use this to figure out what to work on next.',
     {},
     async () => {
       var st = getState();
@@ -188,46 +225,23 @@ export function registerTools(server) {
         var data = await apiGet('/boot/' + st.agentId);
         setBooted(data);
 
-        // 1. Plan steps assigned to me
-        var mySteps = [];
-        for (var p of (data.plans || [])) {
-          for (var s of (p.steps || [])) {
-            if (s.assignee === st.agentId && s.status !== 'completed') {
-              mySteps.push({ plan: p.title, planId: p.id, step: s });
-            }
+        // Use server-side work queue if available
+        if (data.work_queue && data.work_queue.length) {
+          var typeLabels = { directive: 'DIRECTIVE', request: 'REQUEST', plan_step: 'PLAN STEP', task: 'TASK', bug: 'BUG', plan_step_unassigned: 'PLAN STEP (unclaimed)', bug_unassigned: 'BUG (unclaimed)' };
+          lines.push('=== Prioritized Work Queue (' + data.work_queue.length + ' items) ===');
+          for (var i = 0; i < data.work_queue.length; i++) {
+            var item = data.work_queue[i];
+            var label = typeLabels[item.type] || item.type;
+            var line = (i + 1) + '. [' + label + '] #' + item.id;
+            if (item.plan_title) line += ' (' + item.plan_title + ')';
+            line += ': ' + item.title;
+            if (item.status) line += ' [' + item.status + ']';
+            if (item.summary) line += ' — ' + item.summary;
+            lines.push(line);
           }
+        } else {
+          lines.push('No work items found. You are idle.');
         }
-        if (mySteps.length) {
-          lines.push('=== Plan Steps (Priority 1) ===');
-          for (var ms of mySteps) {
-            lines.push('Plan #' + ms.planId + ' "' + ms.plan + '" → Step #' + ms.step.id +
-              ' [' + ms.step.status + '] ' + ms.step.title);
-          }
-          lines.push('');
-        }
-
-        // 2. My tasks
-        if (data.tasks.length) {
-          lines.push('=== Assigned Tasks (Priority 2) ===');
-          for (var t of data.tasks) lines.push(formatTask(t));
-          lines.push('');
-        }
-
-        // 3. Open bugs for my project
-        if (data.open_bugs && data.open_bugs.length) {
-          lines.push('=== Open Bugs (Priority 3) ===');
-          for (var b of data.open_bugs) lines.push(formatBug(b));
-          lines.push('');
-        }
-
-        // 4. Pending requests
-        if (data.pending_requests.length) {
-          lines.push('=== Pending Requests (respond to these) ===');
-          for (var r of data.pending_requests) lines.push(formatMessage(r));
-          lines.push('');
-        }
-
-        if (!lines.length) lines.push('No work items found. You are idle.');
         return text(lines.join('\n'));
       }
 
