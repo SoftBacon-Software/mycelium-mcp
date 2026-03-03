@@ -243,6 +243,25 @@ export function registerTools(server) {
           }
         }
 
+        // Sleep mode / autonomous status
+        if (data.autonomous_mode) {
+          lines.push('');
+          lines.push('*** AUTONOMOUS MODE — All human operators are away ***');
+          if (data.sleep_mode && data.sleep_mode.directive) {
+            lines.push('Night directive: ' + data.sleep_mode.directive);
+          }
+          if (data.sleep_mode && data.sleep_mode.priorities && data.sleep_mode.priorities.length) {
+            lines.push('Priority: ' + data.sleep_mode.priorities.join(', '));
+          }
+          if (data.sleep_mode && data.sleep_mode.approval_policy) {
+            lines.push('Approval policy: ' + data.sleep_mode.approval_policy);
+          }
+          lines.push('High/critical approvals queued for morning — continue other work if blocked.');
+        } else if (data.sleep_mode && data.sleep_mode.active) {
+          lines.push('');
+          lines.push('Sleep mode active but operators still available (' + (data.operators_available || 0) + ')');
+        }
+
         // Savepoint diff
         if (data.savepoint && data.savepoint.has_savepoint) {
           var sp = data.savepoint;
