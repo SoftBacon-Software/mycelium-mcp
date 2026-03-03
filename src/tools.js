@@ -988,7 +988,7 @@ export function registerTools(server) {
     'Create a new chat channel.',
     {
       name: z.string().describe('Channel name (e.g. #project-updates)'),
-      type: z.enum(['general', 'announcement', 'project', 'agent']).optional().describe('Channel type (default: general)'),
+      type: z.enum(['general', 'announcement']).optional().describe('Channel type (default: general)'),
       description: z.string().optional().describe('Channel description')
     },
     async (args) => {
