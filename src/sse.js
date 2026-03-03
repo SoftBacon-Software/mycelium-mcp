@@ -25,8 +25,8 @@ export function stopSSE() {
 
 async function connect(onEvent) {
   var st = getState();
-  // Build URL with auth — SSE endpoint accepts agent key as query param
-  var url = API_URL + '/events/stream?agent_key=' + encodeURIComponent(API_KEY);
+  // Build URL — auth via X-Agent-Key / X-Admin-Key headers (set below)
+  var url = API_URL + '/events/stream';
 
   controller = new AbortController();
 
@@ -99,33 +99,52 @@ function scheduleReconnect(onEvent) {
 function handleEvent(event, agentId, onEvent) {
   // Filter: only surface events relevant to this agent
   var type = event.type || '';
-  var data = event.data || {};
+  var summary = event.summary || '';
 
-  // Messages/requests/directives sent TO this agent
+  // event.data arrives as a JSON string from the server — parse it
+  var data = {};
+  if (event.data) {
+    try { data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; } catch { data = {}; }
+  }
+
+  // Messages sent TO this agent
+  // The server emits message_sent with data={message_id} and summary like:
+  // "sender sent message to <agentId>" or "sender sent directive to <agentId>"
+  // We check if the summary mentions this agent as recipient.
   if (type === 'message_sent' || type === 'message_received') {
-    if (data.to_agent === agentId || data.to_agent === null) {
-      var msgType = data.msg_type || 'message';
-      if (msgType === 'directive') {
-        process.stderr.write('[mycelium-sse] *** DIRECTIVE from ' + (data.from_agent || '?') + ': ' + (data.content || '').substring(0, 200) + ' ***\n');
-      } else if (msgType === 'request') {
-        process.stderr.write('[mycelium-sse] REQUEST from ' + (data.from_agent || '?') + ': ' + (data.content || '').substring(0, 200) + '\n');
+    var summaryLower = summary.toLowerCase();
+    var agentLower = (agentId || '').toLowerCase();
+    var isForMe = agentLower && (summaryLower.indexOf(' to ' + agentLower) !== -1 || summaryLower.indexOf('→ ' + agentLower) !== -1);
+    var isDirective = summaryLower.indexOf('directive') !== -1 || summaryLower.indexOf('request') !== -1;
+    if (isForMe) {
+      if (isDirective) {
+        process.stderr.write('[mycelium-sse] *** INCOMING MESSAGE for you: ' + summary + ' (check mycelium_boot) ***\n');
       } else {
-        process.stderr.write('[mycelium-sse] Message from ' + (data.from_agent || '?') + ': ' + (data.content || '').substring(0, 100) + '\n');
+        process.stderr.write('[mycelium-sse] Incoming message: ' + summary + '\n');
       }
     }
   }
 
-  // Task assigned to this agent
-  if (type === 'task_created' || type === 'task_updated') {
-    if (data.assignee === agentId) {
-      process.stderr.write('[mycelium-sse] Task assigned: #' + (data.id || '?') + ' ' + (data.title || '') + '\n');
+  // Directive or request events (message_id in data, check summary for our agent)
+  if (type === 'request_created' || type === 'approval_created') {
+    var sum = summary.toLowerCase();
+    var aid = (agentId || '').toLowerCase();
+    if (aid && sum.indexOf(aid) !== -1) {
+      process.stderr.write('[mycelium-sse] ' + type.replace('_', ' ') + ': ' + summary + ' (check mycelium_boot)\n');
     }
   }
 
-  // Plan step assigned to this agent
-  if (type === 'plan_step_updated' || type === 'plan_step_completed') {
+  // Task assigned/updated — check summary for agent mention
+  if (type === 'task_created' || type === 'task_updated') {
     if (data.assignee === agentId) {
-      process.stderr.write('[mycelium-sse] Plan step update: ' + (data.title || '') + ' [' + (data.status || '') + ']\n');
+      process.stderr.write('[mycelium-sse] Task #' + (data.task_id || '?') + ' assigned to you: ' + summary + '\n');
+    }
+  }
+
+  // Plan step assigned to this agent (check assignee in data)
+  if (type === 'plan_step_updated' || type === 'work_claimed') {
+    if (data.assignee === agentId || (type === 'work_claimed' && (event.agent || '') === agentId)) {
+      process.stderr.write('[mycelium-sse] Work update: ' + summary + '\n');
     }
   }
 
