@@ -51,13 +51,17 @@ export function setCustomState(key, value) {
 export async function sendHeartbeat() {
   if (state.role !== 'agent' || !state.agentId) return;
   try {
-    await apiPost('/agents/heartbeat', {
+    var result = await apiPost('/agents/heartbeat', {
       status: 'online',
       working_on: state.workingOn,
       session_id: state.sessionId,
       messages_acked: JSON.stringify(state.messagesAcked),
       state_snapshot: JSON.stringify(state.customState)
     });
+    // Warn when messages/requests/directives are waiting — agent should check inbox
+    if (result && result.pending_count > 0) {
+      process.stderr.write('[mycelium] ' + result.pending_count + ' pending message(s) waiting for ' + state.agentId + ' — run mycelium_boot or check messages\n');
+    }
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
   }
