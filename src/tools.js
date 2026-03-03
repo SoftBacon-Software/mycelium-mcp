@@ -207,21 +207,35 @@ export function registerTools(server) {
             if (ctx.key === 'conventions') {
               try {
                 var conv = typeof ctxData === 'string' ? JSON.parse(ctxData) : ctxData;
+                lines.push('Conventions v' + (conv.version || '?') + ':');
                 if (conv.message_types) {
-                  lines.push('Message types: directive (blocking command) | request (blocking ask) | message (FYI) | info (system)');
+                  lines.push('  Message types: directive (blocking, URGENT) | request (blocking, NORMAL) | message (FYI) | info (system) | chat (channels)');
                 }
                 if (conv.approval_tiers) {
-                  lines.push('Approval tiers: low (auto) | medium (auto) | high (1 human) | critical (all humans)');
+                  lines.push('  Approvals: low/medium (auto) | high (1 human) | critical (all humans)');
+                }
+                if (conv.work_priority) {
+                  lines.push('  Work priority: directives > requests > plan steps > tasks > bugs');
+                }
+                if (conv.channel_types) {
+                  lines.push('  Channels: general (auto) | announcement | dm (auto on first DM) | plan | bug | task');
+                }
+                if (conv.realtime) {
+                  lines.push('  Realtime: heartbeat every 5m + SSE stream (GET /events/stream)');
                 }
                 if (conv.drone_conventions) {
-                  lines.push('Drone: Python 3.11/3.12 only, use urllib not curl, set workspace_dir');
+                  lines.push('  Drone: Python 3.11/3.12 only, use urllib not curl, set workspace_dir');
+                }
+                if (conv.auto_dispatch) {
+                  lines.push('  Auto-dispatch: server assigns work to idle agents on heartbeat');
                 }
               } catch (e) {
                 lines.push(ctx.key + ': ' + (typeof ctxData === 'string' ? ctxData.substring(0, 200) : JSON.stringify(ctxData).substring(0, 200)));
               }
-            } else if (ctx.key === 'comms-guide' || ctx.key === 'product-vision') {
-              // Skip verbose docs — agents have CLAUDE.md for reference
-              lines.push(ctx.key + ': available (use mycelium_get_context to read full doc)');
+            } else if (ctx.key === 'comms-guide') {
+              // Deprecated — merged into conventions v2
+            } else if (ctx.key === 'product-vision' || ctx.key === 'concept-flow-design') {
+              lines.push(ctx.key + ': available (use mycelium_get_context to read)');
             } else {
               var preview = typeof ctxData === 'string' ? ctxData.substring(0, 150) : JSON.stringify(ctxData).substring(0, 150);
               lines.push(ctx.key + ': ' + preview);
