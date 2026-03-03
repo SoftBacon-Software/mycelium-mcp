@@ -232,22 +232,36 @@ export function registerTools(server) {
 
   registerDual(server,
     'studio_get_work',
-    'Get prioritized work queue: directives > requests > plan steps > tasks > bugs. Use this to figure out what to work on next.',
-    {},
-    async () => {
+    'Get prioritized work queue: directives > requests > plan steps > tasks > bugs. Set auto_claim=true to automatically claim and start the top work item.',
+    {
+      auto_claim: { type: 'boolean', description: 'Auto-claim the top work item (assign to self, set in_progress). Default: false.' }
+    },
+    async (params) => {
       var st = getState();
       var lines = [];
+      var autoClaim = params && params.auto_claim;
 
       if (st.role === 'agent' && st.agentId) {
-        var data = await apiGet('/boot/' + st.agentId);
-        setBooted(data);
+        var endpoint = '/work/' + st.agentId + (autoClaim ? '?auto_claim=true' : '');
+        var data = await apiGet(endpoint);
+        var queue = data.queue || data.work_queue || [];
 
-        // Use server-side work queue if available
-        if (data.work_queue && data.work_queue.length) {
+        if (data.claimed) {
+          lines.push('=== AUTO-CLAIMED ===');
+          var c = data.claimed;
+          lines.push('Type: ' + c.type + ' | ID: #' + c.id);
+          lines.push('Title: ' + c.title);
+          if (c.description) lines.push('Description: ' + c.description);
+          if (c.plan_title) lines.push('Plan: ' + c.plan_title);
+          if (c.summary) lines.push('Summary: ' + c.summary);
+          lines.push('');
+        }
+
+        if (queue.length) {
           var typeLabels = { directive: 'DIRECTIVE', request: 'REQUEST', plan_step: 'PLAN STEP', task: 'TASK', bug: 'BUG', plan_step_unassigned: 'PLAN STEP (unclaimed)', bug_unassigned: 'BUG (unclaimed)' };
-          lines.push('=== Prioritized Work Queue (' + data.work_queue.length + ' items) ===');
-          for (var i = 0; i < data.work_queue.length; i++) {
-            var item = data.work_queue[i];
+          lines.push('=== Prioritized Work Queue (' + queue.length + ' items) ===');
+          for (var i = 0; i < queue.length; i++) {
+            var item = queue[i];
             var label = typeLabels[item.type] || item.type;
             var line = (i + 1) + '. [' + label + '] #' + item.id;
             if (item.plan_title) line += ' (' + item.plan_title + ')';
@@ -256,7 +270,7 @@ export function registerTools(server) {
             if (item.summary) line += ' — ' + item.summary;
             lines.push(line);
           }
-        } else {
+        } else if (!data.claimed) {
           lines.push('No work items found. You are idle.');
         }
         return text(lines.join('\n'));
@@ -314,13 +328,13 @@ export function registerTools(server) {
       if (args.notes) update.description = args.notes;
       await apiPut('/tasks/' + args.task_id, update);
 
-      // Find next task
+      // Find next task (use /work/ to avoid emitting a spurious agent_boot event)
       var nextWork = '';
       if (st.role === 'agent' && st.agentId) {
         try {
-          var boot = await apiGet('/boot/' + st.agentId);
-          if (boot.tasks.length) {
-            nextWork = boot.tasks[0].title;
+          var workData = await apiGet('/work/' + st.agentId);
+          if (workData.tasks.length) {
+            nextWork = workData.tasks[0].title;
           }
         } catch { /* ignore */ }
       }
@@ -636,13 +650,13 @@ export function registerTools(server) {
       if (args.notes) update.admin_notes = args.notes;
       await apiPut('/bugs/' + args.bug_id, update);
 
-      // Check for remaining work
+      // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event)
       var st = getState();
       var nextWork = '';
       if (st.role === 'agent' && st.agentId) {
         try {
-          var boot = await apiGet('/boot/' + st.agentId);
-          if (boot.tasks.length) nextWork = boot.tasks[0].title;
+          var workData = await apiGet('/work/' + st.agentId);
+          if (workData.tasks.length) nextWork = workData.tasks[0].title;
         } catch { /* ignore */ }
       }
       setWorkingOn(nextWork);

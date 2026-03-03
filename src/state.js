@@ -66,10 +66,8 @@ export async function sendHeartbeat() {
 export function startHeartbeat() {
   if (state.role !== 'agent') return;
   stopHeartbeat();
-  // Heartbeat every 5 minutes
+  // Heartbeat every 5 minutes (boot already marks agent online — no need to send immediately)
   state.heartbeatTimer = setInterval(sendHeartbeat, 5 * 60 * 1000);
-  // Send one immediately
-  sendHeartbeat();
 }
 
 export function stopHeartbeat() {
