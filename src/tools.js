@@ -186,6 +186,49 @@ export function registerTools(server) {
         lines.push('=== Other Agents ===');
         for (var a of (data.other_agents || [])) lines.push(formatAgent(a));
 
+        // Project concepts — creative DNA shared across the project
+        if (data.concepts && data.concepts.length) {
+          lines.push('');
+          lines.push('=== Project Concepts (' + data.concepts.length + ') ===');
+          for (var concept of data.concepts) {
+            var cline = '#' + concept.id + ' [' + concept.type + '] ' + concept.name;
+            if (concept.description) cline += ' — ' + concept.description.substring(0, 120);
+            lines.push(cline);
+          }
+        }
+
+        // Platform context — conventions and shared knowledge
+        if (data.platform_context && data.platform_context.length) {
+          lines.push('');
+          lines.push('=== Network Context ===');
+          for (var ctx of data.platform_context) {
+            var ctxData = ctx.data;
+            // Parse JSON conventions to extract key fields
+            if (ctx.key === 'conventions') {
+              try {
+                var conv = typeof ctxData === 'string' ? JSON.parse(ctxData) : ctxData;
+                if (conv.message_types) {
+                  lines.push('Message types: directive (blocking command) | request (blocking ask) | message (FYI) | info (system)');
+                }
+                if (conv.approval_tiers) {
+                  lines.push('Approval tiers: low (auto) | medium (auto) | high (1 human) | critical (all humans)');
+                }
+                if (conv.drone_conventions) {
+                  lines.push('Drone: Python 3.11/3.12 only, use urllib not curl, set workspace_dir');
+                }
+              } catch (e) {
+                lines.push(ctx.key + ': ' + (typeof ctxData === 'string' ? ctxData.substring(0, 200) : JSON.stringify(ctxData).substring(0, 200)));
+              }
+            } else if (ctx.key === 'comms-guide' || ctx.key === 'product-vision') {
+              // Skip verbose docs — agents have CLAUDE.md for reference
+              lines.push(ctx.key + ': available (use mycelium_get_context to read full doc)');
+            } else {
+              var preview = typeof ctxData === 'string' ? ctxData.substring(0, 150) : JSON.stringify(ctxData).substring(0, 150);
+              lines.push(ctx.key + ': ' + preview);
+            }
+          }
+        }
+
         // Savepoint diff
         if (data.savepoint && data.savepoint.has_savepoint) {
           var sp = data.savepoint;
@@ -1498,7 +1541,7 @@ function fieldToZod(field) {
     if (field.properties) {
       base = jsonSchemaObjectToZod(field);
     } else {
-      base = z.record(z.any());
+      base = z.record(z.string(), z.any());
     }
   } else {
     base = z.string();
@@ -1606,6 +1649,10 @@ export async function registerPluginTools(server) {
       process.stderr.write('Plugin discovery: no tools returned\n');
       return 0;
     }
+    // Suppress per-tool notifications during bulk registration to avoid
+    // flooding the MCP client (which can cause Claude Code to drop the connection).
+    var origSendToolListChanged = server.sendToolListChanged.bind(server);
+    server.sendToolListChanged = function() {};
     var count = 0;
     for (var tool of tools) {
       try {
@@ -1616,6 +1663,11 @@ export async function registerPluginTools(server) {
       } catch (err) {
         process.stderr.write('Plugin tool registration failed for ' + tool.name + ': ' + err.message + '\n');
       }
+    }
+    // Restore and send a single notification for all registered tools
+    server.sendToolListChanged = origSendToolListChanged;
+    if (count > 0) {
+      server.sendToolListChanged();
     }
     process.stderr.write('Plugin discovery: registered ' + count + ' tools from ' + tools.length + ' definitions\n');
     return count;

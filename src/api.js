@@ -1,7 +1,23 @@
 // HTTP client for the Mycelium API
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+// Read key from settings.json as ground truth — env vars from Claude Code can be stale
+function resolveKey() {
+  var envKey = process.env.MYCELIUM_API_KEY || '';
+  try {
+    var settingsPath = join(homedir(), '.claude', 'settings.json');
+    var settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    var mcpEnv = settings.mcpServers && settings.mcpServers.mycelium && settings.mcpServers.mycelium.env;
+    if (mcpEnv && mcpEnv.MYCELIUM_API_KEY) return mcpEnv.MYCELIUM_API_KEY;
+  } catch {}
+  return envKey;
+}
+
 const API_URL = process.env.MYCELIUM_API_URL || 'https://mycelium.fyi/api/mycelium';
-const API_KEY = process.env.MYCELIUM_API_KEY || '';
+const API_KEY = resolveKey();
 const ROLE = process.env.MYCELIUM_ROLE || 'admin';
 const AGENT_ID = process.env.MYCELIUM_AGENT_ID || '';
 

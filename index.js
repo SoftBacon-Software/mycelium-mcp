@@ -29,7 +29,6 @@ var server = new McpServer({
 });
 
 registerTools(server);
-await registerPluginTools(server);
 
 // Clean shutdown
 process.on('SIGINT', async () => { await shutdown(); process.exit(0); });
@@ -39,3 +38,8 @@ var transport = new StdioServerTransport();
 await server.connect(transport);
 
 process.stderr.write('Mycelium MCP server running (' + role + (agentId ? ':' + agentId : '') + ')\n');
+
+// Register plugin tools after transport is connected so startup isn't blocked by network
+registerPluginTools(server).catch(function(err) {
+  process.stderr.write('Plugin tool registration error: ' + err.message + '\n');
+});
