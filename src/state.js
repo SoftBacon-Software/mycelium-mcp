@@ -1,6 +1,7 @@
 // Session state and auto-heartbeat management
 
 import { apiPost, apiPut } from './api.js';
+import { startSSE, stopSSE } from './sse.js';
 
 var state = {
   agentId: process.env.MYCELIUM_AGENT_ID || null,
@@ -72,6 +73,10 @@ export function startHeartbeat() {
   stopHeartbeat();
   // Heartbeat every 5 minutes (boot already marks agent online — no need to send immediately)
   state.heartbeatTimer = setInterval(sendHeartbeat, 5 * 60 * 1000);
+  // Send one immediately
+  sendHeartbeat();
+  // Start SSE subscription for real-time event delivery
+  startSSE(null);
 }
 
 export function stopHeartbeat() {
@@ -83,6 +88,7 @@ export function stopHeartbeat() {
 
 export async function shutdown() {
   stopHeartbeat();
+  stopSSE();
   if (state.role === 'agent' && state.agentId) {
     // Auto-save session summary
     try {

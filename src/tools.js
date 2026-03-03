@@ -690,6 +690,22 @@ export function registerTools(server) {
     }
   );
 
+  // ===== REKEY =====
+
+  registerDual(server,
+    'studio_rekey',
+    'Rotate your agent API key. Returns a new key — update your MCP config (MYCELIUM_API_KEY) with it and restart your session.',
+    {},
+    async () => {
+      var st = getState();
+      if (st.role !== 'agent' || !st.agentId) {
+        return text('Rekey is only available in agent mode.');
+      }
+      var result = await apiPost('/agents/rekey', {});
+      return text('New API key for ' + result.id + ':\n\n  ' + result.api_key + '\n\nUpdate MYCELIUM_API_KEY in your MCP config (e.g. ~/.claude/settings.json) and restart your Claude session.');
+    }
+  );
+
   // ===== PROFILE =====
 
   registerDual(server,
@@ -1493,6 +1509,110 @@ function formatContact(c) {
     (c.email ? ' <' + c.email + '>' : '') +
     ' — ' + c.type;
 }
+
+// ===== GITHUB =====
+
+  registerDual(server,
+    'studio_list_prs',
+    'List pull requests for a GitHub repo.',
+    {
+      owner: z.string().describe('GitHub owner or org (e.g. grbarajas-soymd)'),
+      repo: z.string().describe('Repository name (e.g. mycelium)'),
+      state: z.enum(['open', 'closed', 'all']).optional().describe('PR state filter (default: open)')
+    },
+    async (args) => {
+      var qs = '?state=' + (args.state || 'open');
+      var result = await apiGet('/github/prs/' + args.owner + '/' + args.repo + qs);
+      if (!result.prs || !result.prs.length) return text('No ' + (args.state || 'open') + ' PRs in ' + args.owner + '/' + args.repo);
+      var lines = ['=== PRs: ' + args.owner + '/' + args.repo + ' (' + result.count + ') ==='];
+      for (var pr of result.prs) {
+        lines.push('#' + pr.number + (pr.draft ? ' [DRAFT]' : '') + ' ' + pr.title + ' (' + pr.author + ' | ' + pr.branch + ')');
+        lines.push('  ' + pr.url);
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_merge_pr',
+    'Merge a pull request on GitHub. Requires GITHUB_TOKEN on the Mycelium server.',
+    {
+      owner: z.string().describe('GitHub owner or org (e.g. grbarajas-soymd)'),
+      repo: z.string().describe('Repository name (e.g. mycelium)'),
+      number: z.number().describe('PR number to merge'),
+      merge_method: z.enum(['merge', 'squash', 'rebase']).optional().describe('Merge method (default: squash)'),
+      commit_title: z.string().optional().describe('Commit title (squash/merge only)'),
+      commit_message: z.string().optional().describe('Commit message body')
+    },
+    async (args) => {
+      var body = { merge_method: args.merge_method || 'squash' };
+      if (args.commit_title) body.commit_title = args.commit_title;
+      if (args.commit_message) body.commit_message = args.commit_message;
+      var result = await apiPost('/github/prs/' + args.owner + '/' + args.repo + '/' + args.number + '/merge', body);
+      return text('Merged PR #' + result.number + ' in ' + args.owner + '/' + args.repo + ' (sha: ' + (result.sha || '?').slice(0, 8) + ')');
+    }
+  );
+
+  registerDual(server,
+    'studio_create_pr',
+    'Create a pull request on GitHub.',
+    {
+      owner: z.string().describe('GitHub owner or org'),
+      repo: z.string().describe('Repository name'),
+      title: z.string().describe('PR title'),
+      head: z.string().describe('Head branch (your changes)'),
+      base: z.string().describe('Base branch (merge target, e.g. main)'),
+      body: z.string().optional().describe('PR description'),
+      draft: z.boolean().optional().describe('Create as draft PR')
+    },
+    async (args) => {
+      var result = await apiPost('/github/prs/' + args.owner + '/' + args.repo, {
+        title: args.title, head: args.head, base: args.base,
+        body: args.body || '', draft: !!args.draft
+      });
+      return text('Created PR #' + result.number + ': ' + result.title + '\n' + result.url);
+    }
+  );
+
+// ===== OPERATOR SLEEP / WAKE =====
+
+  registerDual(server,
+    'studio_sleep',
+    'Mark an operator as sleeping. Broadcasts a night directive to all online agents if all operators are now away. Switches the network into autonomous mode.',
+    {
+      operator_id: z.string().optional().describe('Operator ID to mark as sleeping (default: greatness)'),
+      directive: z.string().optional().describe('Night directive — what should agents focus on while you sleep?'),
+      approval_policy: z.string().optional().describe('Approval policy during sleep: queue_high (default) or auto_approve_low'),
+      auto_wake_at: z.string().optional().describe('ISO timestamp to auto-wake at (optional)'),
+    },
+    async (args) => {
+      var operatorId = args.operator_id || 'greatness';
+      var result = await apiPut('/admin/sleep', {
+        action: 'on',
+        operator_id: operatorId,
+        directive: args.directive || '',
+        approval_policy: args.approval_policy || 'queue_high',
+        auto_wake_at: args.auto_wake_at || null,
+      });
+      return text(operatorId + ' is now sleeping.\n' + JSON.stringify(result, null, 2));
+    }
+  );
+
+  registerDual(server,
+    'studio_wake',
+    'Mark an operator as available (awake). Notifies online agents that humans are back if this is the first operator to return.',
+    {
+      operator_id: z.string().optional().describe('Operator ID to wake (default: greatness)'),
+    },
+    async (args) => {
+      var operatorId = args.operator_id || 'greatness';
+      var result = await apiPut('/admin/sleep', {
+        action: 'off',
+        operator_id: operatorId,
+      });
+      return text(operatorId + ' is now awake.\n' + JSON.stringify(result, null, 2));
+    }
+  );
 
 // ===== PLUGIN AUTO-DISCOVERY =====
 
