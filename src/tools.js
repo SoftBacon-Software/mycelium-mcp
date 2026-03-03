@@ -186,6 +186,17 @@ export function registerTools(server) {
         lines.push('=== Other Agents ===');
         for (var a of (data.other_agents || [])) lines.push(formatAgent(a));
 
+        // Project concepts — creative DNA shared across the project
+        if (data.concepts && data.concepts.length) {
+          lines.push('');
+          lines.push('=== Project Concepts (' + data.concepts.length + ') ===');
+          for (var concept of data.concepts) {
+            var cline = '#' + concept.id + ' [' + concept.type + '] ' + concept.name;
+            if (concept.description) cline += ' — ' + concept.description.substring(0, 120);
+            lines.push(cline);
+          }
+        }
+
         // Savepoint diff
         if (data.savepoint && data.savepoint.has_savepoint) {
           var sp = data.savepoint;
