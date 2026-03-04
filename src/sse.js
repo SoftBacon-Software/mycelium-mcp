@@ -12,7 +12,10 @@ var connected = false;
 
 export function isSSEConnected() { return connected; }
 
-export function startSSE(onEvent) {
+var mcpServerRef = null;
+
+export function startSSE(onEvent, mcpServer) {
+  if (mcpServer) mcpServerRef = mcpServer;
   stopSSE();
   connect(onEvent);
 }
@@ -146,6 +149,27 @@ function handleEvent(event, agentId, onEvent) {
     if (data.assignee === agentId || (type === 'work_claimed' && (event.agent || '') === agentId)) {
       process.stderr.write('[mycelium-sse] Work update: ' + summary + '\n');
     }
+  }
+
+  // Sleep mode activated — inject work directive into this Claude Code session
+  if (type === 'sleep_mode_on' && mcpServerRef && mcpServerRef.server) {
+    var directive = (data && data.directive) || '';
+    var prompt = 'Sleep mode is now active. The operator has gone to sleep.\n\n' +
+      (directive ? 'Night directive: ' + directive + '\n\n' : '') +
+      'Run your autonomous work loop:\n' +
+      '1. Call mycelium_boot to load current state\n' +
+      '2. Call mycelium_get_work with auto_claim=true to claim your top priority item\n' +
+      '3. Execute the work fully\n' +
+      '4. Mark it done, then repeat until the queue is empty\n' +
+      'Keep working until mycelium_get_work returns empty or sleep mode ends.';
+    mcpServerRef.server.createMessage({
+      messages: [{ role: 'user', content: { type: 'text', text: prompt } }],
+      maxTokens: 8096,
+      includeContext: 'thisServer'
+    }).catch(function(e) {
+      process.stderr.write('[mycelium-sse] Could not inject sleep directive: ' + e.message + '\n');
+    });
+    process.stderr.write('[mycelium-sse] Sleep mode active — work directive injected\n');
   }
 
   // Pass all events to callback if provided

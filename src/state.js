@@ -77,15 +77,20 @@ export async function sendHeartbeat() {
   }
 }
 
-export function startHeartbeat() {
+export function setMcpServer(mcpServer) {
+  state.mcpServer = mcpServer;
+}
+
+export function startHeartbeat(mcpServer) {
   if (state.role !== 'agent') return;
+  if (mcpServer) state.mcpServer = mcpServer;
   stopHeartbeat();
   // Heartbeat every 5 minutes (boot already marks agent online — no need to send immediately)
   state.heartbeatTimer = setInterval(sendHeartbeat, 5 * 60 * 1000);
   // Send one immediately
   sendHeartbeat();
-  // Start SSE subscription for real-time event delivery
-  startSSE(null);
+  // Start SSE subscription — pass server so sleep_mode_on can wake this session
+  startSSE(null, state.mcpServer);
 }
 
 export function stopHeartbeat() {
