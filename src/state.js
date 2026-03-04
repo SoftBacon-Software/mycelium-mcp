@@ -63,6 +63,15 @@ export async function sendHeartbeat() {
     if (result && result.pending_count > 0) {
       process.stderr.write('[mycelium] ' + result.pending_count + ' pending message(s) waiting for ' + state.agentId + ' — run mycelium_boot or check messages\n');
     }
+    // Surface work queue items discovered on heartbeat
+    if (result && result.work_queue && result.work_queue.length > 0) {
+      process.stderr.write('[mycelium] === Work Queue (' + result.work_queue.length + ' items) ===\n');
+      for (var item of result.work_queue) {
+        var label = (item.type || 'unknown').toUpperCase();
+        var snippet = (item.title || item.content || '').substring(0, 80);
+        process.stderr.write('[mycelium]   ' + label + ' #' + item.id + ': ' + snippet + '\n');
+      }
+    }
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
   }
