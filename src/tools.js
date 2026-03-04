@@ -705,6 +705,53 @@ export function registerTools(server) {
     }
   );
 
+  // ===== SLEEP MODE =====
+
+  registerDual(server,
+    'studio_sleep',
+    'Turn sleep mode on or off. When on, agents receive a night directive and work autonomously. When off, you get a morning summary of what happened.',
+    {
+      action: z.enum(['on', 'off']).describe('on = go to sleep, off = wake up'),
+      directive: z.string().optional().describe('Night directive for agents (what to work on while you sleep). Only used with action=on.'),
+      operator_id: z.string().optional().describe('Your operator ID (auto-detected if omitted)'),
+    },
+    async (args) => {
+      var body = { action: args.action };
+      if (args.directive) body.directive = args.directive;
+      if (args.operator_id) body.operator_id = args.operator_id;
+      var data = await apiPut('/admin/sleep', body);
+      if (args.action === 'on') {
+        var lines = ['Sleep mode ON. Agents notified.'];
+        if (data.sleep_mode && data.sleep_mode.directive) lines.push('Directive: ' + data.sleep_mode.directive);
+        lines.push('Run mycelium_sleep with action=off when you wake up to get your morning summary.');
+        return text(lines.join('\n'));
+      } else {
+        var wlines = ['Sleep mode OFF. Good morning!'];
+        var log = data.morning_summary;
+        if (log) {
+          if (log.tasks_completed && log.tasks_completed.length > 0) {
+            wlines.push('\nTasks completed (' + log.tasks_completed.length + '):');
+            for (var t of log.tasks_completed) wlines.push('  ✓ ' + (t.title || t.id));
+          }
+          if (log.steps_completed && log.steps_completed.length > 0) {
+            wlines.push('\nPlan steps completed (' + log.steps_completed.length + '):');
+            for (var s of log.steps_completed) wlines.push('  ✓ ' + (s.title || s.id));
+          }
+          if (log.approvals_queued && log.approvals_queued.length > 0) {
+            wlines.push('\nApprovals waiting (' + log.approvals_queued.length + '):');
+            for (var a of log.approvals_queued) wlines.push('  ! ' + (a.title || a.id));
+          }
+          if ((!log.tasks_completed || log.tasks_completed.length === 0) &&
+              (!log.steps_completed || log.steps_completed.length === 0)) {
+            wlines.push('Nothing was completed while you slept.');
+          }
+        }
+        if (data.slept_since) wlines.push('\nSlept since: ' + data.slept_since);
+        return text(wlines.join('\n'));
+      }
+    }
+  );
+
   // ===== REKEY =====
 
   registerDual(server,
