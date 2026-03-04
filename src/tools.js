@@ -1388,18 +1388,24 @@ export function registerTools(server) {
     'Queue a new drone job for GPU/CPU workers to pick up.',
     {
       title: z.string().describe('Job title'),
-      command: z.string().describe('Shell command to execute on the drone'),
+      command: z.string().optional().describe('Shell command to execute on the drone (optional if job_type is set)'),
       requires: z.array(z.string()).optional().describe('Required capabilities, e.g. ["gpu"]'),
       priority: z.number().optional().describe('Priority (1=highest, default 5)'),
-      input_data: z.string().optional().describe('JSON string of metadata for the job')
+      input_data: z.string().optional().describe('JSON string of metadata for the job'),
+      job_type: z.string().optional().describe('Job template ID (e.g. "kc_art_gen"). Auto-fills requires and renders command at claim time.')
     },
     async (args) => {
-      var body = { title: args.title, command: args.command };
+      var body = { title: args.title };
+      if (args.command) body.command = args.command;
       if (args.requires) body.requires = args.requires;
       if (args.priority) body.priority = args.priority;
       if (args.input_data) body.input_data = args.input_data;
+      if (args.job_type) body.job_type = args.job_type;
       var result = await apiPost('/drones/jobs', body);
-      return text('Queued drone job #' + result.id + ': ' + args.title + '\nPriority: ' + (args.priority || 5) + ' | Requires: ' + JSON.stringify(args.requires || ['cpu']));
+      var info = 'Queued drone job #' + result.id + ': ' + args.title;
+      if (args.job_type) info += '\nTemplate: ' + args.job_type;
+      info += '\nPriority: ' + (args.priority || 5) + ' | Requires: ' + JSON.stringify(args.requires || ['cpu']);
+      return text(info);
     }
   );
 
@@ -1448,6 +1454,60 @@ export function registerTools(server) {
       for (var a of artifacts) {
         var size = a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.round(a.size / 1024) + ' KB';
         lines.push(a.name + ' (' + size + ') — uploaded ' + timeAgo(a.uploaded));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  // ===== JOB TEMPLATES =====
+
+  registerDual(server,
+    'studio_list_job_templates',
+    'List job templates for smart drone job routing. Templates define what each job type needs (deps, GPU, artifacts).',
+    {},
+    async () => {
+      var templates = await apiGet('/drones/templates');
+      if (!templates.length) return text('No job templates found.');
+      var lines = ['=== Job Templates (' + templates.length + ') ==='];
+      for (var t of templates) {
+        var reqs = t.requires;
+        try { if (typeof reqs === 'string') reqs = JSON.parse(reqs); } catch (e) { reqs = []; }
+        lines.push(t.id + ' — ' + t.name +
+          (t.project_id ? ' [' + t.project_id + ']' : '') +
+          ' | requires: ' + JSON.stringify(reqs) +
+          (t.min_vram_gb > 0 ? ' | VRAM: ' + t.min_vram_gb + 'GB+' : '') +
+          ' | disk: ' + t.min_disk_gb + 'GB+');
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_check_drone_compatibility',
+    'Check which job templates a drone can handle based on its diagnostics (GPU, VRAM, disk, deps).',
+    {
+      drone_id: z.string().describe('Drone ID to check compatibility for')
+    },
+    async (args) => {
+      var result = await apiGet('/drones/' + encodeURIComponent(args.drone_id) + '/compatibility');
+      if (result.error) return text('Error: ' + result.error);
+      var lines = ['=== Compatibility for ' + result.drone_id + ' ==='];
+      if (result.compatible && result.compatible.length) {
+        lines.push('');
+        lines.push('Compatible:');
+        for (var c of result.compatible) {
+          lines.push('  [OK] ' + c.template + ' (' + c.name + ')' + (c.notes ? ' — ' + c.notes : ''));
+        }
+      }
+      if (result.incompatible && result.incompatible.length) {
+        lines.push('');
+        lines.push('Incompatible:');
+        for (var ic of result.incompatible) {
+          lines.push('  [X] ' + ic.template + ' (' + ic.name + ') — ' + ic.reasons.join(', '));
+        }
+      }
+      if ((!result.compatible || !result.compatible.length) && (!result.incompatible || !result.incompatible.length)) {
+        lines.push('No templates found to check against.');
       }
       return text(lines.join('\n'));
     }
