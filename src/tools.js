@@ -683,8 +683,23 @@ export function registerTools(server) {
         var body = { status: 'online', working_on: args.working_on };
         if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
         if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
-        await apiPost('/agents/heartbeat', body);
-        return text('Heartbeat sent with savepoint. working_on: "' + args.working_on + '"');
+        var result = await apiPost('/agents/heartbeat', body);
+        var lines = ['Heartbeat sent. working_on: "' + args.working_on + '"'];
+        if (result && result.work_queue && result.work_queue.length > 0) {
+          lines.push('');
+          lines.push('=== WORK WAITING (' + result.work_queue.length + ' items) ===');
+          for (var item of result.work_queue) {
+            var label = (item.type || 'unknown').toUpperCase();
+            var snippet = (item.title || item.content || '').substring(0, 80);
+            lines.push(label + ' #' + item.id + ': ' + snippet);
+          }
+          lines.push('');
+          lines.push('Run mycelium_get_work to claim your next item.');
+        } else if (result && result.pending_count > 0) {
+          lines.push('');
+          lines.push(result.pending_count + ' pending message(s) waiting — run mycelium_boot to check.');
+        }
+        return text(lines.join('\n'));
       }
       return text('working_on set locally: "' + args.working_on + '" (admin mode — no heartbeat sent)');
     }
