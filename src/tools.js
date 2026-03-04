@@ -218,7 +218,7 @@ export function registerTools(server) {
                   lines.push('  Work priority: directives > requests > plan steps > tasks > bugs');
                 }
                 if (conv.channel_types) {
-                  lines.push('  Channels: general (auto) | announcement | dm (auto on first DM) | plan | bug | task');
+                  lines.push('  Channels: general | announcement | dm (auto on first DM)');
                 }
                 if (conv.realtime) {
                   lines.push('  Realtime: heartbeat every 5m + SSE stream (GET /events/stream)');
