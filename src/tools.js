@@ -1516,7 +1516,7 @@ function formatContact(c) {
     'studio_list_prs',
     'List pull requests for a GitHub repo.',
     {
-      owner: z.string().describe('GitHub owner or org (e.g. grbarajas-soymd)'),
+      owner: z.string().describe('GitHub owner or org (e.g. SoftBacon-Software)'),
       repo: z.string().describe('Repository name (e.g. mycelium)'),
       state: z.enum(['open', 'closed', 'all']).optional().describe('PR state filter (default: open)')
     },
@@ -1537,7 +1537,7 @@ function formatContact(c) {
     'studio_merge_pr',
     'Merge a pull request on GitHub. Requires GITHUB_TOKEN on the Mycelium server.',
     {
-      owner: z.string().describe('GitHub owner or org (e.g. grbarajas-soymd)'),
+      owner: z.string().describe('GitHub owner or org (e.g. SoftBacon-Software)'),
       repo: z.string().describe('Repository name (e.g. mycelium)'),
       number: z.number().describe('PR number to merge'),
       merge_method: z.enum(['merge', 'squash', 'rebase']).optional().describe('Merge method (default: squash)'),
