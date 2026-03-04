@@ -9,7 +9,7 @@ function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
 }
 
-// Register a tool under both mycelium_* (primary) and studio_* (alias) names
+// Register a tool under mycelium_* name only (studio_* aliases removed to stay under tool limits)
 // Wraps handler with error handling so failures return MCP error content instead of crashing
 function registerDual(server, studioName, description, schema, handler) {
   var myceliumName = studioName.replace(/^studio_/, 'mycelium_');
@@ -22,7 +22,6 @@ function registerDual(server, studioName, description, schema, handler) {
     }
   };
   server.tool(myceliumName, description, schema, safeHandler);
-  server.tool(studioName, description, schema, safeHandler);
 }
 
 // Safely parse a JSON string param, returning fallback on failure
@@ -1453,7 +1452,8 @@ export function registerTools(server) {
       return text(lines.join('\n'));
     }
   );
-}
+
+// (registerTools continues — GitHub, sleep/wake tools below, closed after studio_wake)
 
 function formatOverview(data) {
   var lines = [];
@@ -1635,46 +1635,7 @@ function formatContact(c) {
       return text('Created PR #' + result.number + ': ' + result.title + '\n' + result.url);
     }
   );
-
-// ===== OPERATOR SLEEP / WAKE =====
-
-  registerDual(server,
-    'studio_sleep',
-    'Mark an operator as sleeping. Broadcasts a night directive to all online agents if all operators are now away. Switches the network into autonomous mode.',
-    {
-      operator_id: z.string().optional().describe('Operator ID to mark as sleeping (default: greatness)'),
-      directive: z.string().optional().describe('Night directive — what should agents focus on while you sleep?'),
-      approval_policy: z.string().optional().describe('Approval policy during sleep: queue_high (default) or auto_approve_low'),
-      auto_wake_at: z.string().optional().describe('ISO timestamp to auto-wake at (optional)'),
-    },
-    async (args) => {
-      var operatorId = args.operator_id || 'greatness';
-      var result = await apiPut('/admin/sleep', {
-        action: 'on',
-        operator_id: operatorId,
-        directive: args.directive || '',
-        approval_policy: args.approval_policy || 'queue_high',
-        auto_wake_at: args.auto_wake_at || null,
-      });
-      return text(operatorId + ' is now sleeping.\n' + JSON.stringify(result, null, 2));
-    }
-  );
-
-  registerDual(server,
-    'studio_wake',
-    'Mark an operator as available (awake). Notifies online agents that humans are back if this is the first operator to return.',
-    {
-      operator_id: z.string().optional().describe('Operator ID to wake (default: greatness)'),
-    },
-    async (args) => {
-      var operatorId = args.operator_id || 'greatness';
-      var result = await apiPut('/admin/sleep', {
-        action: 'off',
-        operator_id: operatorId,
-      });
-      return text(operatorId + ' is now awake.\n' + JSON.stringify(result, null, 2));
-    }
-  );
+}
 
 // ===== PLUGIN AUTO-DISCOVERY =====
 
@@ -1694,7 +1655,7 @@ function fieldToZod(field) {
     if (field.properties) {
       base = jsonSchemaObjectToZod(field);
     } else {
-      base = z.record(z.any());
+      base = z.record(z.string(), z.any());
     }
   } else {
     base = z.string();

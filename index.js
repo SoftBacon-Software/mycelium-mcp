@@ -30,14 +30,21 @@ var server = new McpServer({
 });
 
 registerTools(server);
-await registerPluginTools(server);
 
 // Clean shutdown
 process.on('SIGINT', async () => { await shutdown(); process.exit(0); });
 process.on('SIGTERM', async () => { await shutdown(); process.exit(0); });
 
+// Connect FIRST so Claude Code can handshake immediately
 var transport = new StdioServerTransport();
 await server.connect(transport);
+
+process.stderr.write('Mycelium MCP server running (' + role + (agentId ? ':' + agentId : '') + ')\n');
+
+// Discover plugin tools AFTER connect (non-blocking for MCP handshake)
+registerPluginTools(server).catch(function(e) {
+  process.stderr.write('Plugin discovery error: ' + e.message + '\n');
+});
 
 // Start heartbeat (agent) or SSE-only (admin) so sleep_mode_on can wake this session
 if (role === 'agent') {
@@ -46,5 +53,3 @@ if (role === 'agent') {
   // Admin mode: start SSE for sleep mode wake-up even without heartbeat
   startSSE(null, server);
 }
-
-process.stderr.write('Mycelium MCP server running (' + role + (agentId ? ':' + agentId : '') + ')\n');
