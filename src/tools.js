@@ -50,34 +50,24 @@ function formatAgent(a) {
 }
 
 function formatTask(t) {
-  return '#' + t.id + ' [' + t.status + '] ' + t.title +
-    (t.assignee ? ' (→ ' + t.assignee + ')' : '') +
-    (t.priority && t.priority !== 'normal' ? ' [' + t.priority + ']' : '');
-}
-
-function formatMessage(m) {
-  var tag = m.msg_type === 'request' ? '[REQ] ' : '';
-  return tag + m.from_agent + ' → ' + (m.to_agent || 'all') + ': ' + m.content +
-    ' (' + timeAgo(m.created_at) + ')' +
-    (m.status !== 'sent' ? ' [' + m.status + ']' : '');
+  return '#' + t.id + ' [' + t.status + '] ' + t.title + (t.assignee ? ' →' + t.assignee : '') + (t.priority && t.priority !== 'normal' ? ' [' + t.priority + ']' : '');
 }
 
 function formatBug(b) {
-  var proj = b.project_id;
-  return '#' + b.id + ' [' + b.severity + '] ' + b.title +
-    ' (' + proj + ', ' + b.status + ')' +
-    (b.assignee ? ' → ' + b.assignee : '');
+  return '#' + b.id + ' [' + b.severity + '] ' + b.title + (b.assignee ? ' →' + b.assignee : '') + ' (' + b.status + ')';
+}
+
+function formatMessage(m) {
+  var tag = m.msg_type === 'request' ? '[REQ] ' : m.msg_type === 'directive' ? '[DIR] ' : '';
+  var body = (m.content || '').slice(0, 200);
+  if ((m.content || '').length > 200) body += '...';
+  return tag + m.from_agent + '→' + (m.to_agent || 'all') + ': ' + body;
 }
 
 function formatPlan(p) {
-  var lines = ['Plan #' + p.id + ' [' + p.status + '] ' + p.title];
-  if (p.steps && p.steps.length) {
-    for (var s of p.steps) {
-      lines.push('  Step #' + s.id + ' [' + s.status + '] ' + s.title +
-        (s.assignee ? ' → ' + s.assignee : ''));
-    }
-  }
-  return lines.join('\n');
+  var steps = (p.steps || []);
+  var done = steps.filter(function (s) { return s.status === 'completed'; }).length;
+  return '#' + p.id + ' [' + p.status + '] ' + p.title + ' (' + done + '/' + steps.length + ' steps done)';
 }
 
 export function registerTools(server) {
@@ -94,196 +84,93 @@ export function registerTools(server) {
         var data = await apiGet('/boot/' + st.agentId + '?verbose=true');
         setBooted(data);
         startHeartbeat();
-        var proj = data.agent.project_id;
-        var lines = ['Booted as ' + st.agentId + ' (' + proj + ')', ''];
+        var proj = data.agent.project || '';
+        var lines = ['Booted as ' + st.agentId + ' (' + proj + ')'];
 
-        // Role contract — who am I and what do I do?
+        // Role contract
         if (data.role_contract) {
-          var rc = data.role_contract;
+          lines.push('');
           lines.push('=== Role Contract ===');
-          lines.push('Role: ' + rc.role + (rc.llm_backend ? ' (' + rc.llm_backend + '/' + (rc.llm_model || '?') + ')' : ''));
-          if (rc.description) lines.push('Description: ' + rc.description);
-          if (rc.responsibilities && rc.responsibilities.length) {
-            lines.push('Responsibilities:');
-            for (var resp of rc.responsibilities) lines.push('  - ' + resp);
+          var rc = data.role_contract;
+          if (typeof rc === 'string') {
+            lines.push(rc);
+          } else {
+            lines.push('Role: ' + (rc.role || '') + (rc.llm_backend ? ' (' + rc.llm_backend + '/' + (rc.llm_model || '?') + ')' : ''));
+            if (rc.description) lines.push(rc.description);
+            if (rc.responsibilities && rc.responsibilities.length) {
+              for (var resp of rc.responsibilities) lines.push('- ' + resp);
+            }
+            if (rc.constraints && rc.constraints.length) {
+              for (var con of rc.constraints) lines.push('! ' + con);
+            }
+            if (rc.capabilities && rc.capabilities.length) lines.push('Can: ' + rc.capabilities.join(', '));
           }
-          if (rc.constraints && rc.constraints.length) {
-            lines.push('Constraints:');
-            for (var con of rc.constraints) lines.push('  - ' + con);
-          }
-          if (rc.capabilities && rc.capabilities.length) lines.push('Capabilities: ' + rc.capabilities.join(', '));
-          if (rc.guidelines) lines.push('Guidelines: ' + (rc.guidelines.length > 300 ? rc.guidelines.substring(0, 300) + '...' : rc.guidelines));
-          lines.push('');
         }
 
-        // Project info
-        if (data.project) {
-          lines.push('=== Project ===');
-          lines.push(data.project.name + (data.project.type ? ' [' + data.project.type + ']' : '') + ': ' + (data.project.description || 'No description'));
-          lines.push('');
+        // Counts summary
+        if (data.counts) {
+          var c = data.counts;
+          var parts = [];
+          if (c.directives) parts.push(c.directives + ' directive' + (c.directives > 1 ? 's' : ''));
+          if (c.requests) parts.push(c.requests + ' request' + (c.requests > 1 ? 's' : ''));
+          if (c.messages_unread) parts.push(c.messages_unread + ' unread');
+          if (c.tasks_mine) parts.push(c.tasks_mine + ' task' + (c.tasks_mine > 1 ? 's' : ''));
+          if (c.bugs_open) parts.push(c.bugs_open + ' bug' + (c.bugs_open > 1 ? 's' : ''));
+          if (c.plans_active) parts.push(c.plans_active + ' active plan' + (c.plans_active > 1 ? 's' : ''));
+          if (parts.length) lines.push('\nPending: ' + parts.join(', '));
         }
 
-        // Prioritized work queue — what should I do next?
-        if (data.work_queue && data.work_queue.length) {
+        // Work queue
+        if (data.work_queue && data.work_queue.length > 0) {
+          lines.push('');
           lines.push('=== Work Queue (' + data.work_queue.length + ' items) ===');
-          var typeLabels = { directive: 'DIRECTIVE', request: 'REQUEST', plan_step: 'PLAN STEP', task: 'TASK', bug: 'BUG', plan_step_unassigned: 'PLAN STEP (unclaimed)', bug_unassigned: 'BUG (unclaimed)' };
-          for (var i = 0; i < Math.min(data.work_queue.length, 15); i++) {
-            var item = data.work_queue[i];
-            var label = typeLabels[item.type] || item.type;
-            var line = (i + 1) + '. [' + label + '] #' + item.id;
-            if (item.plan_title) line += ' (' + item.plan_title + ')';
-            line += ': ' + item.title;
-            if (item.status) line += ' [' + item.status + ']';
-            lines.push(line);
+          for (var item of data.work_queue) {
+            lines.push((item.type || '').toUpperCase() + ' #' + item.id + ': ' + item.title);
           }
-          if (data.work_queue.length > 15) lines.push('... and ' + (data.work_queue.length - 15) + ' more');
-          lines.push('');
         }
 
-        // Pending directives (blocking — repeat for emphasis)
+        // Blocking directives
         if (data.pending_directives && data.pending_directives.length > 0) {
+          lines.push('');
           lines.push('*** BLOCKING DIRECTIVES (' + data.pending_directives.length + ') ***');
           lines.push('You MUST respond to these before receiving work assignments.');
           for (var dir of data.pending_directives) {
-            lines.push('  #' + dir.id + ' from ' + dir.from_agent + ': ' + (dir.content || '').substring(0, 200));
+            lines.push('  #' + dir.id + ' from ' + dir.from + ': ' + (dir.content || '').substring(0, 200));
           }
-          lines.push('');
         }
 
-        if (data.pending_requests.length) {
+        // Pending requests
+        if (data.pending_requests && data.pending_requests.length > 0) {
+          lines.push('');
           lines.push('=== Pending Requests (' + data.pending_requests.length + ') ===');
-          for (var r of data.pending_requests) lines.push(formatMessage(r));
-          lines.push('');
-        }
-
-        if (data.new_messages.length) {
-          lines.push('=== New Messages (' + data.new_messages.length + ') ===');
-          for (var m of data.new_messages) lines.push(formatMessage(m));
-          lines.push('');
-        }
-
-        if (data.plans && data.plans.length) {
-          lines.push('=== Active Plans ===');
-          for (var p of data.plans) lines.push(formatPlan(p));
-          lines.push('');
-        }
-
-        if (data.open_bugs && data.open_bugs.length) {
-          lines.push('=== Open Bugs (' + data.open_bugs.length + ') ===');
-          for (var b of data.open_bugs) lines.push(formatBug(b));
-          lines.push('');
-        }
-
-        if (data.my_approvals && data.my_approvals.length) {
-          lines.push('=== My Pending Approvals (' + data.my_approvals.length + ') ===');
-          for (var ap of data.my_approvals) {
-            lines.push('#' + ap.id + ' [' + ap.status + '] ' + ap.action_type + ': ' + ap.title);
-          }
-          lines.push('');
-        }
-
-        lines.push('=== Other Agents ===');
-        for (var a of (data.other_agents || [])) lines.push(formatAgent(a));
-
-        // Project concepts — creative DNA shared across the project
-        if (data.concepts && data.concepts.length) {
-          lines.push('');
-          lines.push('=== Project Concepts (' + data.concepts.length + ') ===');
-          for (var concept of data.concepts) {
-            var cline = '#' + concept.id + ' [' + concept.type + '] ' + concept.name;
-            if (concept.description) cline += ' — ' + concept.description.substring(0, 120);
-            lines.push(cline);
+          for (var r of data.pending_requests) {
+            lines.push('[REQ] ' + r.from + ': ' + (r.content || '').substring(0, 200));
           }
         }
 
-        // Platform context — conventions and shared knowledge
-        if (data.platform_context && data.platform_context.length) {
+        // Other agents
+        if (data.other_agents && data.other_agents.length > 0) {
           lines.push('');
-          lines.push('=== Network Context ===');
-          for (var ctx of data.platform_context) {
-            var ctxData = ctx.data;
-            // Parse JSON conventions to extract key fields
-            if (ctx.key === 'conventions') {
-              try {
-                var conv = typeof ctxData === 'string' ? JSON.parse(ctxData) : ctxData;
-                lines.push('Conventions v' + (conv.version || '?') + ':');
-                if (conv.message_types) {
-                  lines.push('  Message types: directive (blocking, URGENT) | request (blocking, NORMAL) | message (FYI) | info (system) | chat (channels)');
-                }
-                if (conv.approval_tiers) {
-                  lines.push('  Approvals: low/medium (auto) | high (1 human) | critical (all humans)');
-                }
-                if (conv.work_priority) {
-                  lines.push('  Work priority: directives > requests > plan steps > tasks > bugs');
-                }
-                if (conv.channel_types) {
-                  lines.push('  Channels: general | announcement | dm (auto on first DM)');
-                }
-                if (conv.realtime) {
-                  lines.push('  Realtime: heartbeat every 5m + SSE stream (GET /events/stream)');
-                }
-                if (conv.drone_conventions) {
-                  lines.push('  Drone: Python 3.11/3.12 only, use urllib not curl, set workspace_dir');
-                }
-                if (conv.auto_dispatch) {
-                  lines.push('  Auto-dispatch: server assigns work to idle agents on heartbeat');
-                }
-              } catch (e) {
-                lines.push(ctx.key + ': ' + (typeof ctxData === 'string' ? ctxData.substring(0, 200) : JSON.stringify(ctxData).substring(0, 200)));
-              }
-            } else if (ctx.key === 'comms-guide') {
-              // Deprecated — merged into conventions v2
-            } else if (ctx.key === 'product-vision' || ctx.key === 'concept-flow-design') {
-              lines.push(ctx.key + ': available (use mycelium_get_context to read)');
-            } else {
-              var preview = typeof ctxData === 'string' ? ctxData.substring(0, 150) : JSON.stringify(ctxData).substring(0, 150);
-              lines.push(ctx.key + ': ' + preview);
-            }
+          lines.push('=== Agents ===');
+          for (var a of data.other_agents) {
+            lines.push('[' + (a.status === 'online' ? 'ON' : 'OFF') + '] ' + a.id + (a.working_on ? ': ' + a.working_on : ''));
           }
         }
 
-        // Sleep mode / autonomous status
-        if (data.autonomous_mode) {
-          lines.push('');
-          lines.push('*** AUTONOMOUS MODE — All human operators are away ***');
-          if (data.sleep_mode && data.sleep_mode.directive) {
-            lines.push('Night directive: ' + data.sleep_mode.directive);
-          }
-          if (data.sleep_mode && data.sleep_mode.priorities && data.sleep_mode.priorities.length) {
-            lines.push('Priority: ' + data.sleep_mode.priorities.join(', '));
-          }
-          if (data.sleep_mode && data.sleep_mode.approval_policy) {
-            lines.push('Approval policy: ' + data.sleep_mode.approval_policy);
-          }
-          lines.push('High/critical approvals queued for morning — continue other work if blocked.');
-        } else if (data.sleep_mode && data.sleep_mode.active) {
-          lines.push('');
-          lines.push('Sleep mode active but operators still available (' + (data.operators_available || 0) + ')');
-        }
-
-        // Savepoint diff
+        // Savepoint
         if (data.savepoint && data.savepoint.has_savepoint) {
           var sp = data.savepoint;
           lines.push('');
-          lines.push('=== Session Resume (savepoint ' + sp.savepoint_at + ') ===');
+          lines.push('=== Session Resume ===');
           lines.push('Last session: ' + (sp.was_working_on || 'idle'));
-          if (sp.notes) lines.push('*** NOTES FROM ADMIN: ' + sp.notes + ' ***');
-          var s = sp.summary;
-          var changes = [];
-          if (s.messages > 0) changes.push(s.messages + ' new msgs');
-          if (s.tasks > 0) changes.push(s.tasks + ' tasks changed');
-          if (s.context > 0) changes.push(s.context + ' context updates');
-          if (s.plans > 0) changes.push(s.plans + ' plan updates');
-          if (s.bugs > 0) changes.push(s.bugs + ' bug updates');
-          if (s.drone_jobs > 0) changes.push(s.drone_jobs + ' drone job updates');
-          if (changes.length) lines.push('Changes since: ' + changes.join(', '));
-          else lines.push('No changes since last session.');
-        } else {
-          lines.push('');
-          lines.push('First boot — no previous savepoint.');
+          if (sp.notes) lines.push('*** NOTES: ' + sp.notes + ' ***');
         }
 
-        lines.push('', 'Auto-heartbeat started (every 5m). Server time: ' + data.server_time);
+        if (data.changes_since_last) {
+          lines.push('Changes: ' + data.changes_since_last);
+        }
+
+        lines.push('', 'Auto-heartbeat started. Server time: ' + data.server_time);
         return text(lines.join('\n'));
       }
 
@@ -772,22 +659,13 @@ export function registerTools(server) {
         if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
         if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
         var result = await apiPost('/agents/heartbeat', body);
-        var lines = ['Heartbeat sent. working_on: "' + args.working_on + '"'];
-        if (result && result.work_queue && result.work_queue.length > 0) {
-          lines.push('');
-          lines.push('=== WORK WAITING (' + result.work_queue.length + ' items) ===');
-          for (var item of result.work_queue) {
-            var label = (item.type || 'unknown').toUpperCase();
-            var snippet = (item.title || item.content || '').substring(0, 80);
-            lines.push(label + ' #' + item.id + ': ' + snippet);
-          }
-          lines.push('');
-          lines.push('Run mycelium_get_work to claim your next item.');
-        } else if (result && result.pending_count > 0) {
-          lines.push('');
-          lines.push(result.pending_count + ' pending message(s) waiting — run mycelium_boot to check.');
+        var line = 'Heartbeat sent. working_on: "' + (args.working_on || '') + '"';
+        if (result && result.pending > 0) line += ' | ' + result.pending + ' pending';
+        if (result && result.wake) line += ' | WAKE: urgent items waiting — run mycelium_get_work';
+        if (result && result.auto_dispatched && result.auto_dispatched.length > 0) {
+          line += '\nAuto-dispatched: ' + result.auto_dispatched.map(function (d) { return d.title; }).join(', ');
         }
-        return text(lines.join('\n'));
+        return text(line);
       }
       return text('working_on set locally: "' + args.working_on + '" (admin mode — no heartbeat sent)');
     }
@@ -1606,108 +1484,83 @@ export function registerTools(server) {
 
 function formatOverview(data) {
   var lines = [];
-  var agents = data.agents || [];
-  lines.push('=== Agents (' + agents.length + ') ===');
-  for (var a of agents) lines.push(formatAgent(a));
-  lines.push('');
 
-  var tasks = data.tasks || {};
-  var open = tasks.open || [];
-  var inProg = tasks.in_progress || [];
-  var review = tasks.review || [];
-  var done = tasks.done || [];
-  lines.push('=== Tasks: ' + open.length + ' open, ' + inProg.length + ' in-progress, ' +
-    review.length + ' review, ' + done.length + ' recently done ===');
-  for (var t of [].concat(open, inProg, review)) lines.push(formatTask(t));
-  lines.push('');
-
-  var plans = data.plans || [];
-  if (plans.length) {
-    lines.push('=== Plans (' + plans.length + ') ===');
-    for (var p of plans) {
-      lines.push('Plan #' + p.id + ' [' + p.status + '] ' + p.title);
-    }
-    lines.push('');
-  }
-
-  var msgs = data.messages || [];
-  var pending = msgs.filter(function (m) { return m.msg_type === 'request' && m.status !== 'completed' && m.status !== 'resolved'; });
-  if (pending.length) {
-    lines.push('=== Pending Requests (' + pending.length + ') ===');
-    for (var r of pending) lines.push(formatMessage(r));
-    lines.push('');
-  }
-
-  var bugs = data.bugs || [];
-  var openBugs = bugs.filter(function (b) { return b.status === 'open' || b.status === 'in_progress'; });
-  if (openBugs.length) {
-    lines.push('=== Open Bugs (' + openBugs.length + ') ===');
-    for (var b of openBugs) lines.push(formatBug(b));
-    lines.push('');
-  }
-
-  var aq = data.approval_queue || [];
-  if (aq.length) {
-    lines.push('=== Task Approval Queue (' + aq.length + ') ===');
-    for (var q of aq) lines.push(formatTask(q));
-    lines.push('');
-  }
-
-  var ga = data.pending_approvals || [];
-  if (ga.length) {
-    lines.push('=== Gate Approvals (' + ga.length + ' pending) ===');
-    for (var g of ga) {
-      lines.push('#' + g.id + ' [' + g.action_type + '] ' + g.title +
-        ' (by ' + g.requested_by + ', ' + (g.project || '') + ')');
-    }
-    lines.push('');
-  }
-
-  // Operators (team)
-  if (data.operators && data.operators.length > 0) {
-    lines.push('=== Team (' + data.operators.length + ') ===');
-    for (var op of data.operators) {
-      lines.push('  ' + op.display_name + ' (' + op.id + ') - ' + op.role + (op.responsibilities ? ': ' + op.responsibilities : ''));
-    }
-    lines.push('');
-  }
-
-  // Drones
-  var drones = data.drones || [];
-  var droneJobs = data.drone_jobs || [];
-  if (drones.length || droneJobs.length) {
-    if (drones.length) {
-      lines.push('=== Drone Workers (' + drones.length + ') ===');
-      for (var d of drones) {
-        var dIcon = d.status === 'online' ? '[ON]' : '[OFF]';
-        lines.push(dIcon + ' ' + d.name + ' (' + d.id + ')' +
-          (d.working_on ? ' — ' + d.working_on : '') +
-          ' — last seen ' + timeAgo(d.last_heartbeat));
+  // Agents
+  if (data.agents && data.agents.length > 0) {
+    lines.push('=== Agents ===');
+    for (var a of data.agents) {
+      // Support both slim format (id, status, working_on, heartbeat) and full format
+      if (a.heartbeat) {
+        lines.push('[' + (a.status === 'online' ? 'ON' : 'OFF') + '] ' + a.id + (a.working_on ? ': ' + a.working_on : '') + ' (' + a.heartbeat + ')');
+      } else {
+        lines.push(formatAgent(a));
       }
-      lines.push('');
-    }
-    if (droneJobs.length) {
-      var pending2 = droneJobs.filter(function (j) { return j.status === 'pending'; });
-      var claimed = droneJobs.filter(function (j) { return j.status === 'claimed'; });
-      var djDone = droneJobs.filter(function (j) { return j.status === 'done'; });
-      var djFailed = droneJobs.filter(function (j) { return j.status === 'failed'; });
-      lines.push('=== Drone Jobs: ' + pending2.length + ' pending, ' + claimed.length + ' running, ' +
-        djDone.length + ' done, ' + djFailed.length + ' failed ===');
-      for (var dj of droneJobs.filter(function (j) { return j.status !== 'done' && j.status !== 'cancelled'; })) {
-        lines.push('#' + dj.id + ' [' + dj.status + '] ' + dj.title +
-          (dj.drone_id ? ' (→ ' + dj.drone_id + ')' : ''));
-      }
-      lines.push('');
     }
   }
 
-  // Instance Config
-  if (data.instance_config && data.instance_config.length > 0) {
-    lines.push('=== Instance Config ===');
-    for (var cfg of data.instance_config) {
-      lines.push('  ' + cfg.key + ' = ' + cfg.value);
-    }
+  // Counts (slim format)
+  if (data.counts) {
+    var c = data.counts;
     lines.push('');
+    lines.push('=== Counts ===');
+    lines.push('Tasks: ' + (c.tasks_open || 0) + ' open, ' + (c.tasks_in_progress || 0) + ' in progress');
+    lines.push('Bugs: ' + (c.bugs_open || 0) + ' open | Plans: ' + (c.plans_active || 0) + ' active');
+    lines.push('Requests: ' + (c.requests_pending || 0) + ' pending | Approvals: ' + (c.approvals_pending || 0) + ' pending');
+    lines.push('Drones: ' + (c.drones_online || 0) + ' online, ' + (c.drone_jobs_pending || 0) + ' jobs pending');
+  }
+
+  // Attention (slim format)
+  if (data.attention && data.attention.length > 0) {
+    lines.push('');
+    lines.push('=== Needs Attention ===');
+    for (var item of data.attention) {
+      lines.push('[' + item.type + '] #' + item.id + ': ' + item.title + ' → ' + item.action + ' (' + item.age + ')');
+    }
+  }
+
+  // Recent activity (slim format)
+  if (data.recent_activity && data.recent_activity.length > 0) {
+    lines.push('');
+    lines.push('=== Recent ===');
+    for (var act of data.recent_activity) {
+      lines.push(act);
+    }
+  }
+
+  // Legacy full format fallback — if data has `tasks` object, use old format
+  if (data.tasks && !data.counts) {
+    var tasks = data.tasks || {};
+    var open = tasks.open || [];
+    var inProg = tasks.in_progress || [];
+    var review = tasks.review || [];
+    var done = tasks.done || [];
+    lines.push('');
+    lines.push('=== Tasks: ' + open.length + ' open, ' + inProg.length + ' in-progress, ' +
+      review.length + ' review, ' + done.length + ' recently done ===');
+    for (var t of [].concat(open, inProg, review)) lines.push(formatTask(t));
+
+    var plans = data.plans || [];
+    if (plans.length) {
+      lines.push('');
+      lines.push('=== Plans (' + plans.length + ') ===');
+      for (var p of plans) lines.push('Plan #' + p.id + ' [' + p.status + '] ' + p.title);
+    }
+
+    var msgs = data.messages || [];
+    var pendingReqs = msgs.filter(function (m) { return m.msg_type === 'request' && m.status !== 'completed' && m.status !== 'resolved'; });
+    if (pendingReqs.length) {
+      lines.push('');
+      lines.push('=== Pending Requests (' + pendingReqs.length + ') ===');
+      for (var r of pendingReqs) lines.push(formatMessage(r));
+    }
+
+    var bugs = data.bugs || [];
+    var openBugs = bugs.filter(function (b) { return b.status === 'open' || b.status === 'in_progress'; });
+    if (openBugs.length) {
+      lines.push('');
+      lines.push('=== Open Bugs (' + openBugs.length + ') ===');
+      for (var b of openBugs) lines.push(formatBug(b));
+    }
   }
 
   return lines.join('\n');
