@@ -1,6 +1,7 @@
 // Session state and auto-heartbeat management
 
 import { apiPost, apiPut } from './api.js';
+import { startSSE, stopSSE } from './sse.js';
 
 var state = {
   agentId: process.env.MYCELIUM_AGENT_ID || null,
@@ -11,7 +12,11 @@ var state = {
   bootData: null,
   messagesAcked: [],
   sessionId: null,
-  customState: {}
+  customState: {},
+  // Auto-tracked working state — populates state_snapshot automatically
+  claimedItem: null,    // { type, id, title } — from claim_task, claim_bug, get_work auto_claim
+  currentStep: null,    // { plan_id, step_id, title } — from update_step
+  progressNotes: []     // brief notes accumulated during work
 };
 
 export function getState() { return state; }
@@ -48,6 +53,30 @@ export function setCustomState(key, value) {
   state.customState[key] = value;
 }
 
+export function setClaimedItem(item) {
+  state.claimedItem = item || null;
+}
+
+export function setCurrentStep(step) {
+  state.currentStep = step || null;
+}
+
+export function addProgressNote(note) {
+  state.progressNotes.push(note);
+  // Keep only last 20 notes to avoid unbounded growth
+  if (state.progressNotes.length > 20) {
+    state.progressNotes = state.progressNotes.slice(-20);
+  }
+}
+
+export function getAutoSnapshot() {
+  var snapshot = Object.assign({}, state.customState);
+  if (state.claimedItem) snapshot.claimed_item = state.claimedItem;
+  if (state.currentStep) snapshot.current_step = state.currentStep;
+  if (state.progressNotes.length) snapshot.progress = state.progressNotes;
+  return snapshot;
+}
+
 export async function sendHeartbeat() {
   if (state.role !== 'agent' || !state.agentId) return;
   try {
@@ -56,9 +85,9 @@ export async function sendHeartbeat() {
       working_on: state.workingOn,
       session_id: state.sessionId,
       messages_acked: JSON.stringify(state.messagesAcked),
-      state_snapshot: JSON.stringify(state.customState)
+      state_snapshot: JSON.stringify(getAutoSnapshot())
     });
-    // Alert agent if there are pending messages/requests/directives
+    // Alert agent if there are pending messages/requests/directives (granular)
     if (result && result.pending) {
       var p = result.pending;
       var total = (p.directives || 0) + (p.requests || 0) + (p.unread || 0);
@@ -70,18 +99,38 @@ export async function sendHeartbeat() {
         process.stderr.write('[mycelium] ' + total + ' unread message(s)\n');
       }
     }
+    // Warn when messages/requests/directives are waiting (simple count fallback)
+    if (result && result.pending_count > 0) {
+      process.stderr.write('[mycelium] ' + result.pending_count + ' pending message(s) waiting for ' + state.agentId + ' — run mycelium_boot or check messages\n');
+    }
+    // Surface work queue items discovered on heartbeat
+    if (result && result.work_queue && result.work_queue.length > 0) {
+      process.stderr.write('[mycelium] === Work Queue (' + result.work_queue.length + ' items) ===\n');
+      for (var item of result.work_queue) {
+        var label = (item.type || 'unknown').toUpperCase();
+        var snippet = (item.title || item.content || '').substring(0, 80);
+        process.stderr.write('[mycelium]   ' + label + ' #' + item.id + ': ' + snippet + '\n');
+      }
+    }
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
   }
 }
 
-export function startHeartbeat() {
+export function setMcpServer(mcpServer) {
+  state.mcpServer = mcpServer;
+}
+
+export function startHeartbeat(mcpServer) {
   if (state.role !== 'agent') return;
+  if (mcpServer) state.mcpServer = mcpServer;
   stopHeartbeat();
-  // Heartbeat every 5 minutes
+  // Heartbeat every 5 minutes (boot already marks agent online — no need to send immediately)
   state.heartbeatTimer = setInterval(sendHeartbeat, 5 * 60 * 1000);
   // Send one immediately
   sendHeartbeat();
+  // Start SSE subscription — pass server so sleep_mode_on can wake this session
+  startSSE(null, state.mcpServer);
 }
 
 export function stopHeartbeat() {
@@ -93,6 +142,7 @@ export function stopHeartbeat() {
 
 export async function shutdown() {
   stopHeartbeat();
+  stopSSE();
   if (state.role === 'agent' && state.agentId) {
     // Auto-save session summary
     try {

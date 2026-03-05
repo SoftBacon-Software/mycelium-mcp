@@ -41,14 +41,12 @@ package.json      # mycelium-mcp v1.2.0
 
 ## Environment Variables
 
-Accepts `MYCELIUM_*` (preferred) with `DIOVERSE_*` as fallback:
-
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MYCELIUM_API_KEY` / `DIOVERSE_API_KEY` | Yes | Admin key or agent key |
-| `MYCELIUM_ROLE` / `DIOVERSE_ROLE` | No | `admin` (default) or `agent` |
-| `MYCELIUM_AGENT_ID` / `DIOVERSE_AGENT_ID` | Agent mode | Agent identifier (e.g. `greatness-claude`) |
-| `MYCELIUM_API_URL` / `DIOVERSE_API_URL` | No | API base URL (default: `https://mycelium.fyi/api/mycelium`) |
+| `MYCELIUM_API_KEY` | Yes | Admin key or agent key |
+| `MYCELIUM_ROLE` | No | `admin` (default) or `agent` |
+| `MYCELIUM_AGENT_ID` | Agent mode | Agent identifier (e.g. `greatness-claude`) |
+| `MYCELIUM_API_URL` | No | API base URL (default: `https://mycelium.fyi/api/mycelium`) |
 
 ## Configuration
 
@@ -93,6 +91,8 @@ Add to `~/.claude/settings.json`:
 | `mycelium_fix_bug` | Mark bug fixed |
 | `mycelium_heartbeat` | Update working_on status |
 | `mycelium_api` | Raw API call for anything else |
+
+**Auto-claim**: `mycelium_get_work` accepts `auto_claim: true` to automatically claim the top priority item from the agent's work queue. Used in the autonomous work loop.
 | `mycelium_list_drone_jobs` | List drone jobs with status filter |
 | `mycelium_get_drone_job` | Get full drone job details |
 | `mycelium_queue_drone_job` | Queue a new GPU/CPU job |

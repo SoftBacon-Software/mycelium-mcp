@@ -48,7 +48,7 @@ git init && git add -A && git commit -m "chore: project setup with MCP SDK"
 **Files:**
 - Create: `D:/dioverse-mcp/src/api.js`
 
-HTTP client wrapping native fetch. Exports `apiGet(path)`, `apiPost(path, body)`, `apiPut(path, body)`, `apiDelete(path)`. Reads `DIOVERSE_API_URL` and `DIOVERSE_API_KEY` + `DIOVERSE_ROLE` from env. Sets `X-Admin-Key` or `X-Agent-Key` header accordingly.
+HTTP client wrapping native fetch. Exports `apiGet(path)`, `apiPost(path, body)`, `apiPut(path, body)`, `apiDelete(path)`. Reads `MYCELIUM_API_URL` and `MYCELIUM_API_KEY` + `MYCELIUM_ROLE` from env. Sets `X-Admin-Key` or `X-Agent-Key` header accordingly.
 
 ---
 
