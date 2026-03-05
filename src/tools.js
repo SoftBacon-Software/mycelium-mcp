@@ -3,7 +3,7 @@
 
 import { z } from 'zod';
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
-import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat } from './state.js';
+import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat, setClaimedItem, setCurrentStep, addProgressNote } from './state.js';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -254,6 +254,7 @@ export function registerTools(server) {
           if (c.plan_title) lines.push('Plan: ' + c.plan_title);
           if (c.summary) lines.push('Summary: ' + c.summary);
           lines.push('');
+          setClaimedItem({ type: c.type, id: c.id, title: c.title });
         }
 
         if (queue.length) {
@@ -306,8 +307,9 @@ export function registerTools(server) {
       var task = await apiGet('/tasks/' + args.task_id);
       await apiPut('/tasks/' + args.task_id, { assignee: assignee, status: 'in_progress' });
 
-      // Auto-update working_on
+      // Auto-update working_on and track claimed item
       setWorkingOn(task.title);
+      setClaimedItem({ type: 'task', id: args.task_id, title: task.title });
       if (st.role === 'agent') await sendHeartbeat();
 
       return text('Claimed task #' + args.task_id + ': ' + task.title + '\nworking_on updated to: "' + task.title + '"');
@@ -326,6 +328,8 @@ export function registerTools(server) {
       var update = { status: 'done' };
       if (args.notes) update.description = args.notes;
       await apiPut('/tasks/' + args.task_id, update);
+      addProgressNote('Completed task #' + args.task_id);
+      setClaimedItem(null);
 
       // Find next task (use /work/ to avoid emitting a spurious agent_boot event)
       var nextWork = '';
@@ -501,6 +505,12 @@ export function registerTools(server) {
       if (args.linked_task_id) body.linked_task_id = args.linked_task_id;
       if (args.linked_branch) body.linked_branch = args.linked_branch;
       await apiPut('/plans/' + args.plan_id + '/steps/' + args.step_id, body);
+      if (args.status === 'in_progress') {
+        setCurrentStep({ plan_id: args.plan_id, step_id: args.step_id });
+      } else if (args.status === 'completed' || args.status === 'done') {
+        addProgressNote('Completed step #' + args.step_id + ' on plan #' + args.plan_id);
+        setCurrentStep(null);
+      }
       return text('Updated step #' + args.step_id + ' on plan #' + args.plan_id);
     }
   );
@@ -632,6 +642,7 @@ export function registerTools(server) {
         assignee: st.agentId || '__admin__'
       });
       setWorkingOn('Bug #' + args.bug_id + ': ' + bug.title);
+      setClaimedItem({ type: 'bug', id: args.bug_id, title: bug.title });
       if (st.role === 'agent') await sendHeartbeat();
       return text('Claimed bug #' + args.bug_id + ': ' + bug.title);
     }
@@ -648,6 +659,8 @@ export function registerTools(server) {
       var update = { status: 'fixed' };
       if (args.notes) update.admin_notes = args.notes;
       await apiPut('/bugs/' + args.bug_id, update);
+      addProgressNote('Fixed bug #' + args.bug_id);
+      setClaimedItem(null);
 
       // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event)
       var st = getState();
