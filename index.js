@@ -41,9 +41,9 @@ await server.connect(transport);
 
 process.stderr.write('Mycelium MCP server running (' + role + (agentId ? ':' + agentId : '') + ')\n');
 
-// Discover plugin tools AFTER connect (non-blocking for MCP handshake)
-registerPluginTools(server).catch(function(e) {
-  process.stderr.write('Plugin discovery error: ' + e.message + '\n');
+// Register plugin tools after transport is connected so startup isn't blocked by network
+registerPluginTools(server).catch(function(err) {
+  process.stderr.write('Plugin tool registration error: ' + err.message + '\n');
 });
 
 // Start heartbeat (agent) or SSE-only (admin) so sleep_mode_on can wake this session
