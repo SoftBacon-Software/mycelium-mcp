@@ -57,7 +57,7 @@ Add to `~/.claude/settings.json`:
   "mcpServers": {
     "mycelium": {
       "command": "node",
-      "args": ["D:/dioverse-mcp/index.js"],
+      "args": ["/path/to/mycelium-mcp/index.js"],
       "env": {
         "MYCELIUM_API_URL": "https://mycelium.fyi/api/mycelium",
         "MYCELIUM_ROLE": "admin",
@@ -107,7 +107,5 @@ Add to `~/.claude/settings.json`:
 
 | Repo | What |
 |------|------|
-| `mycelium` | Mycelium platform — dashboard, API, agent coordination (`D:/mycelium/`, deployed at `mycelium.fyi`) |
-| `dioverse-server` | WS game server (`D:/dioverse-server/`, deployed at `willingsacrifice.com`) |
-| `willing-sacrifice` | WS Godot 4.6 game source (`D:/willing-sacrifice/`) |
-| `dioverse` | Art tools, Discord bot, LoRA training (`D:/dioverse/`) |
+| `mycelium` | Mycelium platform — dashboard, API, agent coordination (deployed at `mycelium.fyi`) |
+| `mycelium-runner` | Autonomous agent runner for Mycelium |
