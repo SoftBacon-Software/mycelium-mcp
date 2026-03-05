@@ -287,8 +287,8 @@ export function registerTools(server) {
         return text(lines.join('\n'));
       }
 
-      // Admin mode
-      var overview = await apiGet('/admin/overview');
+      // Admin mode — request verbose format (slim boot removed full data)
+      var overview = await apiGet('/admin/overview?verbose=true');
       return text(formatOverview(overview));
     }
   );
@@ -298,7 +298,7 @@ export function registerTools(server) {
     'Get full Mycelium dashboard snapshot: agents, tasks, messages, plans, bugs.',
     {},
     async () => {
-      var data = await apiGet('/admin/overview');
+      var data = await apiGet('/admin/overview?verbose=true');
       return text(formatOverview(data));
     }
   );
