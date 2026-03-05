@@ -12,7 +12,11 @@ var state = {
   bootData: null,
   messagesAcked: [],
   sessionId: null,
-  customState: {}
+  customState: {},
+  // Auto-tracked working state — populates state_snapshot automatically
+  claimedItem: null,    // { type, id, title } — from claim_task, claim_bug, get_work auto_claim
+  currentStep: null,    // { plan_id, step_id, title } — from update_step
+  progressNotes: []     // brief notes accumulated during work
 };
 
 export function getState() { return state; }
@@ -49,6 +53,30 @@ export function setCustomState(key, value) {
   state.customState[key] = value;
 }
 
+export function setClaimedItem(item) {
+  state.claimedItem = item || null;
+}
+
+export function setCurrentStep(step) {
+  state.currentStep = step || null;
+}
+
+export function addProgressNote(note) {
+  state.progressNotes.push(note);
+  // Keep only last 20 notes to avoid unbounded growth
+  if (state.progressNotes.length > 20) {
+    state.progressNotes = state.progressNotes.slice(-20);
+  }
+}
+
+export function getAutoSnapshot() {
+  var snapshot = Object.assign({}, state.customState);
+  if (state.claimedItem) snapshot.claimed_item = state.claimedItem;
+  if (state.currentStep) snapshot.current_step = state.currentStep;
+  if (state.progressNotes.length) snapshot.progress = state.progressNotes;
+  return snapshot;
+}
+
 export async function sendHeartbeat() {
   if (state.role !== 'agent' || !state.agentId) return;
   try {
@@ -57,7 +85,7 @@ export async function sendHeartbeat() {
       working_on: state.workingOn,
       session_id: state.sessionId,
       messages_acked: JSON.stringify(state.messagesAcked),
-      state_snapshot: JSON.stringify(state.customState)
+      state_snapshot: JSON.stringify(getAutoSnapshot())
     });
     // Warn when messages/requests/directives are waiting — agent should check inbox
     if (result && result.pending_count > 0) {
