@@ -87,7 +87,19 @@ export async function sendHeartbeat() {
       messages_acked: JSON.stringify(state.messagesAcked),
       state_snapshot: JSON.stringify(getAutoSnapshot())
     });
-    // Warn when messages/requests/directives are waiting — agent should check inbox
+    // Alert agent if there are pending messages/requests/directives (granular)
+    if (result && result.pending) {
+      var p = result.pending;
+      var total = (p.directives || 0) + (p.requests || 0) + (p.unread || 0);
+      if (p.directives > 0) {
+        process.stderr.write('[mycelium] *** ' + p.directives + ' PENDING DIRECTIVE(S) — check messages immediately ***\n');
+      } else if (p.requests > 0) {
+        process.stderr.write('[mycelium] ' + p.requests + ' pending request(s) waiting for response\n');
+      } else if (total > 0) {
+        process.stderr.write('[mycelium] ' + total + ' unread message(s)\n');
+      }
+    }
+    // Warn when messages/requests/directives are waiting (simple count fallback)
     if (result && result.pending_count > 0) {
       process.stderr.write('[mycelium] ' + result.pending_count + ' pending message(s) waiting for ' + state.agentId + ' — run mycelium_boot or check messages\n');
     }
