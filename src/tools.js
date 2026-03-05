@@ -411,14 +411,29 @@ export function registerTools(server) {
       limit: z.number().optional().describe('Max messages to return (default 30)')
     },
     async (args) => {
+      var st = getState();
       var params = [];
       if (args.since) params.push('since=' + encodeURIComponent(args.since));
       if (args.from) params.push('from=' + encodeURIComponent(args.from));
       if (args.limit) params.push('limit=' + args.limit);
+      // Auto-filter to this agent's inbox (messages TO me + broadcasts)
+      if (st.agentId && !args.from) params.push('to=' + encodeURIComponent(st.agentId));
       var qs = params.length ? '?' + params.join('&') : '';
       var messages = await apiGet('/messages' + qs);
-      if (!messages.length) return text('No messages found.');
-      var lines = messages.map(formatMessage);
+      // Also fetch pending requests targeted at this agent
+      var pending = [];
+      if (st.agentId) {
+        try {
+          pending = await apiGet('/messages?to=' + encodeURIComponent(st.agentId) + '&status=pending&msg_type=request&limit=10');
+        } catch (e) { /* non-fatal */ }
+      }
+      // Merge: pending requests first (deduped), then recent messages
+      var seenIds = new Set();
+      var all = [];
+      for (var p of pending) { seenIds.add(p.id); all.push(p); }
+      for (var m of messages) { if (!seenIds.has(m.id)) all.push(m); }
+      if (!all.length) return text('No messages found.');
+      var lines = all.map(formatMessage);
       return text(lines.join('\n'));
     }
   );
