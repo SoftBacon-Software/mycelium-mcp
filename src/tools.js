@@ -91,7 +91,7 @@ export function registerTools(server) {
     async () => {
       var st = getState();
       if (st.role === 'agent' && st.agentId) {
-        var data = await apiGet('/boot/' + st.agentId);
+        var data = await apiGet('/boot/' + st.agentId + '?verbose=true');
         setBooted(data);
         startHeartbeat();
         var proj = data.agent.project_id;
