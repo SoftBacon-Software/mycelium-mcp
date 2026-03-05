@@ -3,13 +3,13 @@
 
 import { z } from 'zod';
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
-import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat } from './state.js';
+import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat, setClaimedItem, setCurrentStep, addProgressNote } from './state.js';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
 }
 
-// Register a tool under both mycelium_* (primary) and studio_* (alias) names
+// Register a tool under mycelium_* name only (studio_* aliases removed to stay under tool limits)
 // Wraps handler with error handling so failures return MCP error content instead of crashing
 function registerDual(server, studioName, description, schema, handler) {
   var myceliumName = studioName.replace(/^studio_/, 'mycelium_');
@@ -22,7 +22,6 @@ function registerDual(server, studioName, description, schema, handler) {
     }
   };
   server.tool(myceliumName, description, schema, safeHandler);
-  server.tool(studioName, description, schema, safeHandler);
 }
 
 // Safely parse a JSON string param, returning fallback on failure
@@ -308,22 +307,37 @@ export function registerTools(server) {
 
   registerDual(server,
     'studio_get_work',
-    'Get prioritized work queue: directives > requests > plan steps > tasks > bugs. Use this to figure out what to work on next.',
-    {},
-    async () => {
+    'Get prioritized work queue: directives > requests > plan steps > tasks > bugs. Set auto_claim=true to automatically claim and start the top work item.',
+    {
+      auto_claim: { type: 'boolean', description: 'Auto-claim the top work item (assign to self, set in_progress). Default: false.' }
+    },
+    async (params) => {
       var st = getState();
       var lines = [];
+      var autoClaim = params && params.auto_claim;
 
       if (st.role === 'agent' && st.agentId) {
-        var data = await apiGet('/boot/' + st.agentId);
-        setBooted(data);
+        var endpoint = '/work/' + st.agentId + (autoClaim ? '?auto_claim=true' : '');
+        var data = await apiGet(endpoint);
+        var queue = data.queue || data.work_queue || [];
 
-        // Use server-side work queue if available
-        if (data.work_queue && data.work_queue.length) {
+        if (data.claimed) {
+          lines.push('=== AUTO-CLAIMED ===');
+          var c = data.claimed;
+          lines.push('Type: ' + c.type + ' | ID: #' + c.id);
+          lines.push('Title: ' + c.title);
+          if (c.description) lines.push('Description: ' + c.description);
+          if (c.plan_title) lines.push('Plan: ' + c.plan_title);
+          if (c.summary) lines.push('Summary: ' + c.summary);
+          lines.push('');
+          setClaimedItem({ type: c.type, id: c.id, title: c.title });
+        }
+
+        if (queue.length) {
           var typeLabels = { directive: 'DIRECTIVE', request: 'REQUEST', plan_step: 'PLAN STEP', task: 'TASK', bug: 'BUG', plan_step_unassigned: 'PLAN STEP (unclaimed)', bug_unassigned: 'BUG (unclaimed)' };
-          lines.push('=== Prioritized Work Queue (' + data.work_queue.length + ' items) ===');
-          for (var i = 0; i < data.work_queue.length; i++) {
-            var item = data.work_queue[i];
+          lines.push('=== Prioritized Work Queue (' + queue.length + ' items) ===');
+          for (var i = 0; i < queue.length; i++) {
+            var item = queue[i];
             var label = typeLabels[item.type] || item.type;
             var line = (i + 1) + '. [' + label + '] #' + item.id;
             if (item.plan_title) line += ' (' + item.plan_title + ')';
@@ -332,7 +346,7 @@ export function registerTools(server) {
             if (item.summary) line += ' — ' + item.summary;
             lines.push(line);
           }
-        } else {
+        } else if (!data.claimed) {
           lines.push('No work items found. You are idle.');
         }
         return text(lines.join('\n'));
@@ -369,8 +383,9 @@ export function registerTools(server) {
       var task = await apiGet('/tasks/' + args.task_id);
       await apiPut('/tasks/' + args.task_id, { assignee: assignee, status: 'in_progress' });
 
-      // Auto-update working_on
+      // Auto-update working_on and track claimed item
       setWorkingOn(task.title);
+      setClaimedItem({ type: 'task', id: args.task_id, title: task.title });
       if (st.role === 'agent') await sendHeartbeat();
 
       return text('Claimed task #' + args.task_id + ': ' + task.title + '\nworking_on updated to: "' + task.title + '"');
@@ -389,14 +404,16 @@ export function registerTools(server) {
       var update = { status: 'done' };
       if (args.notes) update.description = args.notes;
       await apiPut('/tasks/' + args.task_id, update);
+      addProgressNote('Completed task #' + args.task_id);
+      setClaimedItem(null);
 
-      // Find next task
+      // Find next task (use /work/ to avoid emitting a spurious agent_boot event)
       var nextWork = '';
       if (st.role === 'agent' && st.agentId) {
         try {
-          var boot = await apiGet('/boot/' + st.agentId);
-          if (boot.tasks.length) {
-            nextWork = boot.tasks[0].title;
+          var workData = await apiGet('/work/' + st.agentId);
+          if (workData.tasks.length) {
+            nextWork = workData.tasks[0].title;
           }
         } catch { /* ignore */ }
       }
@@ -564,6 +581,12 @@ export function registerTools(server) {
       if (args.linked_task_id) body.linked_task_id = args.linked_task_id;
       if (args.linked_branch) body.linked_branch = args.linked_branch;
       await apiPut('/plans/' + args.plan_id + '/steps/' + args.step_id, body);
+      if (args.status === 'in_progress') {
+        setCurrentStep({ plan_id: args.plan_id, step_id: args.step_id });
+      } else if (args.status === 'completed' || args.status === 'done') {
+        addProgressNote('Completed step #' + args.step_id + ' on plan #' + args.plan_id);
+        setCurrentStep(null);
+      }
       return text('Updated step #' + args.step_id + ' on plan #' + args.plan_id);
     }
   );
@@ -695,6 +718,7 @@ export function registerTools(server) {
         assignee: st.agentId || '__admin__'
       });
       setWorkingOn('Bug #' + args.bug_id + ': ' + bug.title);
+      setClaimedItem({ type: 'bug', id: args.bug_id, title: bug.title });
       if (st.role === 'agent') await sendHeartbeat();
       return text('Claimed bug #' + args.bug_id + ': ' + bug.title);
     }
@@ -711,14 +735,16 @@ export function registerTools(server) {
       var update = { status: 'fixed' };
       if (args.notes) update.admin_notes = args.notes;
       await apiPut('/bugs/' + args.bug_id, update);
+      addProgressNote('Fixed bug #' + args.bug_id);
+      setClaimedItem(null);
 
-      // Check for remaining work
+      // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event)
       var st = getState();
       var nextWork = '';
       if (st.role === 'agent' && st.agentId) {
         try {
-          var boot = await apiGet('/boot/' + st.agentId);
-          if (boot.tasks.length) nextWork = boot.tasks[0].title;
+          var workData = await apiGet('/work/' + st.agentId);
+          if (workData.tasks.length) nextWork = workData.tasks[0].title;
         } catch { /* ignore */ }
       }
       setWorkingOn(nextWork);
@@ -745,10 +771,88 @@ export function registerTools(server) {
         var body = { status: 'online', working_on: args.working_on };
         if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
         if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
-        await apiPost('/agents/heartbeat', body);
-        return text('Heartbeat sent with savepoint. working_on: "' + args.working_on + '"');
+        var result = await apiPost('/agents/heartbeat', body);
+        var lines = ['Heartbeat sent. working_on: "' + args.working_on + '"'];
+        if (result && result.work_queue && result.work_queue.length > 0) {
+          lines.push('');
+          lines.push('=== WORK WAITING (' + result.work_queue.length + ' items) ===');
+          for (var item of result.work_queue) {
+            var label = (item.type || 'unknown').toUpperCase();
+            var snippet = (item.title || item.content || '').substring(0, 80);
+            lines.push(label + ' #' + item.id + ': ' + snippet);
+          }
+          lines.push('');
+          lines.push('Run mycelium_get_work to claim your next item.');
+        } else if (result && result.pending_count > 0) {
+          lines.push('');
+          lines.push(result.pending_count + ' pending message(s) waiting — run mycelium_boot to check.');
+        }
+        return text(lines.join('\n'));
       }
       return text('working_on set locally: "' + args.working_on + '" (admin mode — no heartbeat sent)');
+    }
+  );
+
+  // ===== SLEEP MODE =====
+
+  registerDual(server,
+    'studio_sleep',
+    'Turn sleep mode on or off. When on, agents receive a night directive and work autonomously. When off, you get a morning summary of what happened.',
+    {
+      action: z.enum(['on', 'off']).describe('on = go to sleep, off = wake up'),
+      directive: z.string().optional().describe('Night directive for agents (what to work on while you sleep). Only used with action=on.'),
+      operator_id: z.string().optional().describe('Your operator ID (auto-detected if omitted)'),
+    },
+    async (args) => {
+      var body = { action: args.action };
+      if (args.directive) body.directive = args.directive;
+      if (args.operator_id) body.operator_id = args.operator_id;
+      var data = await apiPut('/admin/sleep', body);
+      if (args.action === 'on') {
+        var lines = ['Sleep mode ON. Agents notified.'];
+        if (data.sleep_mode && data.sleep_mode.directive) lines.push('Directive: ' + data.sleep_mode.directive);
+        lines.push('Run mycelium_sleep with action=off when you wake up to get your morning summary.');
+        return text(lines.join('\n'));
+      } else {
+        var wlines = ['Sleep mode OFF. Good morning!'];
+        var log = data.morning_summary;
+        if (log) {
+          if (log.tasks_completed && log.tasks_completed.length > 0) {
+            wlines.push('\nTasks completed (' + log.tasks_completed.length + '):');
+            for (var t of log.tasks_completed) wlines.push('  ✓ ' + (t.title || t.id));
+          }
+          if (log.steps_completed && log.steps_completed.length > 0) {
+            wlines.push('\nPlan steps completed (' + log.steps_completed.length + '):');
+            for (var s of log.steps_completed) wlines.push('  ✓ ' + (s.title || s.id));
+          }
+          if (log.approvals_queued && log.approvals_queued.length > 0) {
+            wlines.push('\nApprovals waiting (' + log.approvals_queued.length + '):');
+            for (var a of log.approvals_queued) wlines.push('  ! ' + (a.title || a.id));
+          }
+          if ((!log.tasks_completed || log.tasks_completed.length === 0) &&
+              (!log.steps_completed || log.steps_completed.length === 0)) {
+            wlines.push('Nothing was completed while you slept.');
+          }
+        }
+        if (data.slept_since) wlines.push('\nSlept since: ' + data.slept_since);
+        return text(wlines.join('\n'));
+      }
+    }
+  );
+
+  // ===== REKEY =====
+
+  registerDual(server,
+    'studio_rekey',
+    'Rotate your agent API key. Returns a new key — update your MCP config (MYCELIUM_API_KEY) with it and restart your session.',
+    {},
+    async () => {
+      var st = getState();
+      if (st.role !== 'agent' || !st.agentId) {
+        return text('Rekey is only available in agent mode.');
+      }
+      var result = await apiPost('/agents/rekey', {});
+      return text('New API key for ' + result.id + ':\n\n  ' + result.api_key + '\n\nUpdate MYCELIUM_API_KEY in your MCP config (e.g. ~/.claude/settings.json) and restart your Claude session.');
     }
   );
 
@@ -1373,18 +1477,24 @@ export function registerTools(server) {
     'Queue a new drone job for GPU/CPU workers to pick up.',
     {
       title: z.string().describe('Job title'),
-      command: z.string().describe('Shell command to execute on the drone'),
+      command: z.string().optional().describe('Shell command to execute on the drone (optional if job_type is set)'),
       requires: z.array(z.string()).optional().describe('Required capabilities, e.g. ["gpu"]'),
       priority: z.number().optional().describe('Priority (1=highest, default 5)'),
-      input_data: z.string().optional().describe('JSON string of metadata for the job')
+      input_data: z.string().optional().describe('JSON string of metadata for the job'),
+      job_type: z.string().optional().describe('Job template ID (e.g. "kc_art_gen"). Auto-fills requires and renders command at claim time.')
     },
     async (args) => {
-      var body = { title: args.title, command: args.command };
+      var body = { title: args.title };
+      if (args.command) body.command = args.command;
       if (args.requires) body.requires = args.requires;
       if (args.priority) body.priority = args.priority;
       if (args.input_data) body.input_data = args.input_data;
+      if (args.job_type) body.job_type = args.job_type;
       var result = await apiPost('/drones/jobs', body);
-      return text('Queued drone job #' + result.id + ': ' + args.title + '\nPriority: ' + (args.priority || 5) + ' | Requires: ' + JSON.stringify(args.requires || ['cpu']));
+      var info = 'Queued drone job #' + result.id + ': ' + args.title;
+      if (args.job_type) info += '\nTemplate: ' + args.job_type;
+      info += '\nPriority: ' + (args.priority || 5) + ' | Requires: ' + JSON.stringify(args.requires || ['cpu']);
+      return text(info);
     }
   );
 
@@ -1437,7 +1547,62 @@ export function registerTools(server) {
       return text(lines.join('\n'));
     }
   );
-}
+
+  // ===== JOB TEMPLATES =====
+
+  registerDual(server,
+    'studio_list_job_templates',
+    'List job templates for smart drone job routing. Templates define what each job type needs (deps, GPU, artifacts).',
+    {},
+    async () => {
+      var templates = await apiGet('/drones/templates');
+      if (!templates.length) return text('No job templates found.');
+      var lines = ['=== Job Templates (' + templates.length + ') ==='];
+      for (var t of templates) {
+        var reqs = t.requires;
+        try { if (typeof reqs === 'string') reqs = JSON.parse(reqs); } catch (e) { reqs = []; }
+        lines.push(t.id + ' — ' + t.name +
+          (t.project_id ? ' [' + t.project_id + ']' : '') +
+          ' | requires: ' + JSON.stringify(reqs) +
+          (t.min_vram_gb > 0 ? ' | VRAM: ' + t.min_vram_gb + 'GB+' : '') +
+          ' | disk: ' + t.min_disk_gb + 'GB+');
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_check_drone_compatibility',
+    'Check which job templates a drone can handle based on its diagnostics (GPU, VRAM, disk, deps).',
+    {
+      drone_id: z.string().describe('Drone ID to check compatibility for')
+    },
+    async (args) => {
+      var result = await apiGet('/drones/' + encodeURIComponent(args.drone_id) + '/compatibility');
+      if (result.error) return text('Error: ' + result.error);
+      var lines = ['=== Compatibility for ' + result.drone_id + ' ==='];
+      if (result.compatible && result.compatible.length) {
+        lines.push('');
+        lines.push('Compatible:');
+        for (var c of result.compatible) {
+          lines.push('  [OK] ' + c.template + ' (' + c.name + ')' + (c.notes ? ' — ' + c.notes : ''));
+        }
+      }
+      if (result.incompatible && result.incompatible.length) {
+        lines.push('');
+        lines.push('Incompatible:');
+        for (var ic of result.incompatible) {
+          lines.push('  [X] ' + ic.template + ' (' + ic.name + ') — ' + ic.reasons.join(', '));
+        }
+      }
+      if ((!result.compatible || !result.compatible.length) && (!result.incompatible || !result.incompatible.length)) {
+        lines.push('No templates found to check against.');
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+// (registerTools continues — GitHub, sleep/wake tools below, closed after studio_wake)
 
 function formatOverview(data) {
   var lines = [];
@@ -1554,6 +1719,71 @@ function formatContact(c) {
     (c.tier ? ' ' + c.tier : '') +
     (c.email ? ' <' + c.email + '>' : '') +
     ' — ' + c.type;
+}
+
+// ===== GITHUB =====
+
+  registerDual(server,
+    'studio_list_prs',
+    'List pull requests for a GitHub repo.',
+    {
+      owner: z.string().describe('GitHub owner or org (e.g. SoftBacon-Software)'),
+      repo: z.string().describe('Repository name (e.g. mycelium)'),
+      state: z.enum(['open', 'closed', 'all']).optional().describe('PR state filter (default: open)')
+    },
+    async (args) => {
+      var qs = '?state=' + (args.state || 'open');
+      var result = await apiGet('/github/prs/' + args.owner + '/' + args.repo + qs);
+      if (!result.prs || !result.prs.length) return text('No ' + (args.state || 'open') + ' PRs in ' + args.owner + '/' + args.repo);
+      var lines = ['=== PRs: ' + args.owner + '/' + args.repo + ' (' + result.count + ') ==='];
+      for (var pr of result.prs) {
+        lines.push('#' + pr.number + (pr.draft ? ' [DRAFT]' : '') + ' ' + pr.title + ' (' + pr.author + ' | ' + pr.branch + ')');
+        lines.push('  ' + pr.url);
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_merge_pr',
+    'Merge a pull request on GitHub. Requires GITHUB_TOKEN on the Mycelium server.',
+    {
+      owner: z.string().describe('GitHub owner or org (e.g. SoftBacon-Software)'),
+      repo: z.string().describe('Repository name (e.g. mycelium)'),
+      number: z.number().describe('PR number to merge'),
+      merge_method: z.enum(['merge', 'squash', 'rebase']).optional().describe('Merge method (default: squash)'),
+      commit_title: z.string().optional().describe('Commit title (squash/merge only)'),
+      commit_message: z.string().optional().describe('Commit message body')
+    },
+    async (args) => {
+      var body = { merge_method: args.merge_method || 'squash' };
+      if (args.commit_title) body.commit_title = args.commit_title;
+      if (args.commit_message) body.commit_message = args.commit_message;
+      var result = await apiPost('/github/prs/' + args.owner + '/' + args.repo + '/' + args.number + '/merge', body);
+      return text('Merged PR #' + result.number + ' in ' + args.owner + '/' + args.repo + ' (sha: ' + (result.sha || '?').slice(0, 8) + ')');
+    }
+  );
+
+  registerDual(server,
+    'studio_create_pr',
+    'Create a pull request on GitHub.',
+    {
+      owner: z.string().describe('GitHub owner or org'),
+      repo: z.string().describe('Repository name'),
+      title: z.string().describe('PR title'),
+      head: z.string().describe('Head branch (your changes)'),
+      base: z.string().describe('Base branch (merge target, e.g. main)'),
+      body: z.string().optional().describe('PR description'),
+      draft: z.boolean().optional().describe('Create as draft PR')
+    },
+    async (args) => {
+      var result = await apiPost('/github/prs/' + args.owner + '/' + args.repo, {
+        title: args.title, head: args.head, base: args.base,
+        body: args.body || '', draft: !!args.draft
+      });
+      return text('Created PR #' + result.number + ': ' + result.title + '\n' + result.url);
+    }
+  );
 }
 
 // ===== PLUGIN AUTO-DISCOVERY =====

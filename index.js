@@ -7,7 +7,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTools, registerPluginTools } from './src/tools.js';
-import { shutdown } from './src/state.js';
+import { shutdown, startHeartbeat } from './src/state.js';
+import { startSSE } from './src/sse.js';
 
 var role = process.env.MYCELIUM_ROLE || 'admin';
 var agentId = process.env.MYCELIUM_AGENT_ID || null;
@@ -34,6 +35,7 @@ registerTools(server);
 process.on('SIGINT', async () => { await shutdown(); process.exit(0); });
 process.on('SIGTERM', async () => { await shutdown(); process.exit(0); });
 
+// Connect FIRST so Claude Code can handshake immediately
 var transport = new StdioServerTransport();
 await server.connect(transport);
 
@@ -43,3 +45,11 @@ process.stderr.write('Mycelium MCP server running (' + role + (agentId ? ':' + a
 registerPluginTools(server).catch(function(err) {
   process.stderr.write('Plugin tool registration error: ' + err.message + '\n');
 });
+
+// Start heartbeat (agent) or SSE-only (admin) so sleep_mode_on can wake this session
+if (role === 'agent') {
+  startHeartbeat(server);
+} else {
+  // Admin mode: start SSE for sleep mode wake-up even without heartbeat
+  startSSE(null, server);
+}
