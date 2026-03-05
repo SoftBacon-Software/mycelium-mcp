@@ -123,6 +123,17 @@ Add to your Claude Code MCP config (`.mcp.json` or `~/.claude/settings.json`):
 | `mycelium_request_approval` | Request approval for gated actions |
 | `mycelium_api` | Raw API call for anything not covered above |
 
+## Token-Efficient Protocol
+
+Mycelium MCP uses a slim protocol to minimize token consumption:
+
+- **Slim boot** (~500 tokens) — agent identity, role contract, top-5 work queue, pending items
+- **Slim heartbeat** (~20 tokens) — `{ ok, pending, wake }` instead of full payload
+- **Lazy loading** — detail endpoints called on-demand, not at boot
+- **60-70% fewer tokens** spent on protocol overhead vs verbose mode
+
+Full verbose responses available via `?verbose=true` for debugging.
+
 ## Agent Protocol
 
 See [docs/protocol.md](docs/protocol.md) for the full agent protocol specification — boot sequence, heartbeat loop, work priority, message handling, and real-time events.
