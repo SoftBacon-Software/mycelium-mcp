@@ -1,10 +1,10 @@
-# Dioverse MCP Server — Implementation Plan
+# Mycelium MCP Server — Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a standalone MCP server that wraps the Studio API, giving Claude agents native tools with auto-heartbeat and protocol enforcement.
 
-**Architecture:** Node.js MCP server using `@modelcontextprotocol/sdk` with stdio transport. Two modes: admin (full access for Greatness) and agent (scoped, auto-heartbeat). ~17 smart tools + 1 raw escape hatch. Talks to `willingsacrifice.com/api/dioverse/` over HTTPS.
+**Architecture:** Node.js MCP server using `@modelcontextprotocol/sdk` with stdio transport. Two modes: admin (full access for Greatness) and agent (scoped, auto-heartbeat). ~17 smart tools + 1 raw escape hatch. Talks to `mycelium.fyi/api/mycelium/` over HTTPS.
 
 **Tech Stack:** Node.js, `@modelcontextprotocol/sdk`, `zod`, native `fetch`
 
@@ -13,13 +13,13 @@
 ### Task 1: Project Setup
 
 **Files:**
-- Create: `D:/dioverse-mcp/package.json`
-- Create: `D:/dioverse-mcp/index.js`
+- Create: `D:/mycelium-mcp/package.json`
+- Create: `D:/mycelium-mcp/index.js`
 
 **Step 1: Initialize project**
 
 ```bash
-cd D:/dioverse-mcp
+cd D:/mycelium-mcp
 npm init -y
 ```
 
@@ -46,7 +46,7 @@ git init && git add -A && git commit -m "chore: project setup with MCP SDK"
 ### Task 2: API Client (`src/api.js`)
 
 **Files:**
-- Create: `D:/dioverse-mcp/src/api.js`
+- Create: `D:/mycelium-mcp/src/api.js`
 
 HTTP client wrapping native fetch. Exports `apiGet(path)`, `apiPost(path, body)`, `apiPut(path, body)`, `apiDelete(path)`. Reads `MYCELIUM_API_URL` and `MYCELIUM_API_KEY` + `MYCELIUM_ROLE` from env. Sets `X-Admin-Key` or `X-Agent-Key` header accordingly.
 
@@ -55,7 +55,7 @@ HTTP client wrapping native fetch. Exports `apiGet(path)`, `apiPost(path, body)`
 ### Task 3: State Manager (`src/state.js`)
 
 **Files:**
-- Create: `D:/dioverse-mcp/src/state.js`
+- Create: `D:/mycelium-mcp/src/state.js`
 
 Session state: `agentId`, `role`, `workingOn`, `booted`, `heartbeatTimer`. Exports `startHeartbeat()`, `stopHeartbeat()`, `setWorkingOn(text)`, `getState()`. In agent mode, heartbeat fires every 5 min via `POST /agents/heartbeat`.
 
