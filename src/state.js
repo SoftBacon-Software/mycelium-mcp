@@ -87,30 +87,31 @@ export async function sendHeartbeat() {
       messages_acked: JSON.stringify(state.messagesAcked),
       state_snapshot: JSON.stringify(getAutoSnapshot())
     });
-    // Alert agent if there are pending messages/requests/directives (granular)
-    if (result && result.pending) {
-      var p = result.pending;
-      var total = (p.directives || 0) + (p.requests || 0) + (p.unread || 0);
-      if (p.directives > 0) {
-        process.stderr.write('[mycelium] *** ' + p.directives + ' PENDING DIRECTIVE(S) — check messages immediately ***\n');
-      } else if (p.requests > 0) {
-        process.stderr.write('[mycelium] ' + p.requests + ' pending request(s) waiting for response\n');
-      } else if (total > 0) {
-        process.stderr.write('[mycelium] ' + total + ' unread message(s)\n');
+    // Surface inbox from heartbeat response
+    if (result && result.inbox) {
+      var inbox = result.inbox;
+      if (inbox.directives && inbox.directives.length > 0) {
+        process.stderr.write('[mycelium] *** ' + inbox.directives.length + ' PENDING DIRECTIVE(S) ***\n');
+        for (var d of inbox.directives) {
+          process.stderr.write('[mycelium]   DIRECTIVE #' + d.id + ' from ' + d.from_agent + ': ' + (d.content || '').substring(0, 120) + '\n');
+        }
       }
-    }
-    // Warn when messages/requests/directives are waiting (simple count fallback)
-    if (result && result.pending_count > 0) {
-      process.stderr.write('[mycelium] ' + result.pending_count + ' pending message(s) waiting for ' + state.agentId + ' — run mycelium_boot or check messages\n');
-    }
-    // Surface work queue items discovered on heartbeat
-    if (result && result.work_queue && result.work_queue.length > 0) {
-      process.stderr.write('[mycelium] === Work Queue (' + result.work_queue.length + ' items) ===\n');
-      for (var item of result.work_queue) {
-        var label = (item.type || 'unknown').toUpperCase();
-        var snippet = (item.title || item.content || '').substring(0, 80);
-        process.stderr.write('[mycelium]   ' + label + ' #' + item.id + ': ' + snippet + '\n');
+      if (inbox.requests && inbox.requests.length > 0) {
+        process.stderr.write('[mycelium] ' + inbox.requests.length + ' pending request(s):\n');
+        for (var r of inbox.requests) {
+          process.stderr.write('[mycelium]   REQ #' + r.id + ' from ' + r.from_agent + ': ' + (r.content || '').substring(0, 120) + '\n');
+        }
       }
+      if (inbox.messages && inbox.messages.length > 0) {
+        process.stderr.write('[mycelium] ' + inbox.messages.length + ' unread message(s):\n');
+        for (var m of inbox.messages) {
+          var sender = m.from_agent || '?';
+          var target = m.to_agent ? ' (DM)' : ' (broadcast)';
+          process.stderr.write('[mycelium]   MSG #' + m.id + ' from ' + sender + target + ': ' + (m.content || '').substring(0, 120) + '\n');
+        }
+      }
+    } else if (result && result.pending > 0) {
+      process.stderr.write('[mycelium] ' + result.pending + ' pending item(s) — call mycelium_read_messages to check\n');
     }
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
