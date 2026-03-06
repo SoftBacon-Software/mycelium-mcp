@@ -50,7 +50,7 @@ package.json      # mycelium-mcp v1.2.0
 
 ## Configuration
 
-Add to `~/.claude/settings.json`:
+Add to `~/.claude.json`:
 
 ```json
 {
