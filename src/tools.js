@@ -2,6 +2,7 @@
 // Tools are registered as mycelium_* (primary) with studio_* aliases.
 
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
 import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat, setClaimedItem, setCurrentStep, addProgressNote } from './state.js';
 
@@ -1212,6 +1213,121 @@ export function registerTools(server) {
       }
       var url = res.download_url || res.path || '(no file attached)';
       return { content: [{ type: 'text', text: 'Asset #' + params.asset_id + ' (' + res.name + ') is ready.\nDownload: ' + url + '\nType: ' + res.type + '\nProject: ' + res.project_id }] };
+    }
+  );
+
+  // ===== CALIBRATION PROFILES =====
+
+  registerDual(server,
+    'studio_get_profile',
+    'Get the resolved calibration profile for an agent (merged from platform → customer → agent layers).',
+    {
+      agent_id: z.string().optional().describe('Agent ID to resolve profile for (defaults to self/current agent)')
+    },
+    async (args) => {
+      var st = getState();
+      var targetId = args.agent_id || st.agentId || '__admin__';
+      var profile = await apiGet('/profiles/resolve/' + encodeURIComponent(targetId));
+      return text(profile);
+    }
+  );
+
+  registerDual(server,
+    'studio_list_profiles',
+    'List all node profiles. Filter by node_type or layer.',
+    {
+      node_type: z.string().optional().describe('Filter by node type (e.g. agent, project, customer)'),
+      layer: z.string().optional().describe('Filter by layer (e.g. platform, customer, agent)')
+    },
+    async (args) => {
+      var params = [];
+      if (args.node_type) params.push('node_type=' + encodeURIComponent(args.node_type));
+      if (args.layer) params.push('layer=' + encodeURIComponent(args.layer));
+      var qs = params.length ? '?' + params.join('&') : '';
+      var profiles = await apiGet('/profiles' + qs);
+      return text(profiles);
+    }
+  );
+
+  registerDual(server,
+    'studio_report_md',
+    'Report your CLAUDE.md state for calibration. Checks content against your profile\'s checkpoints and blocklist, then sends report via heartbeat.',
+    {
+      md_content: z.string().describe('The full text of the CLAUDE.md file')
+    },
+    async (args) => {
+      var st = getState();
+      var agentId = st.agentId || '__admin__';
+
+      // 1. Resolve profile to get checkpoints and blocklist
+      var profile = await apiGet('/profiles/resolve/' + encodeURIComponent(agentId));
+      var checkpoints = (profile && profile.checkpoints) || [];
+      var blocklist = (profile && profile.blocklist) || [];
+
+      // 2. Check md_content against checkpoints and blocklist
+      var content = args.md_content;
+      var anchorsPresent = [];
+      var anchorsMissing = [];
+      for (var cp of checkpoints) {
+        if (content.indexOf(cp) !== -1) {
+          anchorsPresent.push(cp);
+        } else {
+          anchorsMissing.push(cp);
+        }
+      }
+
+      var blocklistFound = [];
+      for (var bl of blocklist) {
+        if (content.indexOf(bl) !== -1) {
+          blocklistFound.push(bl);
+        }
+      }
+
+      // 3. Build md_report
+      var hash = createHash('sha256').update(content).digest('hex').substring(0, 16);
+      var mdReport = {
+        hash: hash,
+        anchors_present: anchorsPresent,
+        anchors_missing: anchorsMissing,
+        blocklist_found: blocklistFound,
+        last_modified: new Date().toISOString(),
+        line_count: content.split('\n').length
+      };
+
+      // 4. Send via heartbeat with state_snapshot containing md_report
+      var heartbeatBody = {
+        status: 'online',
+        working_on: st.workingOn || '',
+        state_snapshot: JSON.stringify({ md_report: mdReport })
+      };
+      await apiPost('/agents/heartbeat', heartbeatBody);
+
+      // 5. Return the report
+      var lines = [
+        '=== CLAUDE.md Report for ' + agentId + ' ===',
+        'Hash: ' + hash,
+        'Lines: ' + mdReport.line_count,
+        ''
+      ];
+      if (anchorsPresent.length) {
+        lines.push('Checkpoints present (' + anchorsPresent.length + '/' + checkpoints.length + '):');
+        for (var ap of anchorsPresent) lines.push('  [OK] ' + ap);
+      }
+      if (anchorsMissing.length) {
+        lines.push('Checkpoints MISSING (' + anchorsMissing.length + '/' + checkpoints.length + '):');
+        for (var am of anchorsMissing) lines.push('  [MISSING] ' + am);
+      }
+      if (blocklistFound.length) {
+        lines.push('');
+        lines.push('BLOCKLIST VIOLATIONS (' + blocklistFound.length + '):');
+        for (var bf of blocklistFound) lines.push('  [BLOCKED] ' + bf);
+      } else {
+        lines.push('');
+        lines.push('Blocklist: clean (0 violations)');
+      }
+      lines.push('');
+      lines.push('Report sent via heartbeat.');
+      return text(lines.join('\n'));
     }
   );
 
