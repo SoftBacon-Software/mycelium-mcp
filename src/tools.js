@@ -578,13 +578,19 @@ export function registerTools(server) {
     {
       namespace: z.string().describe('Namespace'),
       key: z.string().describe('Key name'),
-      data: z.string().describe('Value to store (string or JSON string)')
+      data: z.string().describe('Value to store (string or JSON string)'),
+      category: z.enum(['durable', 'ephemeral']).optional().describe('Key category: durable (persists) or ephemeral (auto-cleaned on boot)'),
+      ttl: z.number().optional().describe('Time-to-live in seconds (auto-sets expires_at)'),
+      expires_at: z.string().optional().describe('ISO timestamp when key expires')
     },
     async (args) => {
-      await apiPut('/context/keys/' + encodeURIComponent(args.namespace) + '/' + encodeURIComponent(args.key), {
-        data: args.data
-      });
-      return text('Saved context: ' + args.namespace + '/' + args.key);
+      var body = { data: args.data };
+      if (args.category) body.category = args.category;
+      if (args.ttl) body.ttl = args.ttl;
+      if (args.expires_at) body.expires_at = args.expires_at;
+      await apiPut('/context/keys/' + encodeURIComponent(args.namespace) + '/' + encodeURIComponent(args.key), body);
+      var suffix = args.ttl ? ' (TTL: ' + args.ttl + 's)' : (args.expires_at ? ' (expires: ' + args.expires_at + ')' : '');
+      return text('Saved context: ' + args.namespace + '/' + args.key + suffix);
     }
   );
 
