@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { createHash } from 'crypto';
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
-import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat, setClaimedItem, setCurrentStep, addProgressNote } from './state.js';
+import { getState, setWorkingOn, setBooted, startHeartbeat, sendHeartbeat, setClaimedItem, setCurrentStep, addProgressNote, consumePendingInbox } from './state.js';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -16,7 +16,13 @@ function registerDual(server, studioName, description, schema, handler) {
   var myceliumName = studioName.replace(/^studio_/, 'mycelium_');
   var safeHandler = async function(args) {
     try {
-      return await handler(args);
+      var result = await handler(args);
+      // Prepend any pending inbox messages from auto-heartbeat
+      var inbox = consumePendingInbox();
+      if (inbox && result && result.content && result.content.length > 0) {
+        result.content[0].text = '--- INCOMING MESSAGES ---\n' + inbox + '\n--- END MESSAGES ---\n\n' + result.content[0].text;
+      }
+      return result;
     } catch (err) {
       var msg = err && err.message ? err.message : String(err);
       return { content: [{ type: 'text', text: 'Error in ' + myceliumName + ': ' + msg }], isError: true };
@@ -177,7 +183,8 @@ export function registerTools(server) {
 
       // Admin mode — request verbose format (slim boot removed full data)
       var overview = await apiGet('/admin/overview?verbose=true');
-      return text(formatOverview(overview));
+      var identity = st.agentId ? 'You are: ' + st.agentId + ' (admin mode)\n\n' : '';
+      return text(identity + formatOverview(overview, st.agentId));
     }
   );
 
@@ -681,13 +688,40 @@ export function registerTools(server) {
         if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
         if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
         var result = await apiPost('/agents/heartbeat', body);
-        var line = 'Heartbeat sent. working_on: "' + (args.working_on || '') + '"';
-        if (result && result.pending > 0) line += ' | ' + result.pending + ' pending';
-        if (result && result.wake) line += ' | WAKE: urgent items waiting — run mycelium_get_work';
+        var lines = ['Heartbeat sent. working_on: "' + (args.working_on || '') + '"'];
+        if (result && result.pending > 0) lines[0] += ' | ' + result.pending + ' pending';
+        if (result && result.wake) lines[0] += ' | WAKE: urgent items waiting';
         if (result && result.auto_dispatched && result.auto_dispatched.length > 0) {
-          line += '\nAuto-dispatched: ' + result.auto_dispatched.map(function (d) { return d.title; }).join(', ');
+          lines.push('Auto-dispatched: ' + result.auto_dispatched.map(function (d) { return d.title; }).join(', '));
         }
-        return text(line);
+        // Surface inbox messages directly in response
+        if (result && result.inbox) {
+          var inbox = result.inbox;
+          if (inbox.directives && inbox.directives.length > 0) {
+            lines.push('');
+            lines.push('=== DIRECTIVES (' + inbox.directives.length + ') — MUST RESPOND ===');
+            for (var d of inbox.directives) {
+              lines.push('[DIR #' + d.id + '] from ' + d.from_agent + ': ' + (d.content || '').substring(0, 300));
+            }
+          }
+          if (inbox.requests && inbox.requests.length > 0) {
+            lines.push('');
+            lines.push('=== REQUESTS (' + inbox.requests.length + ') — MUST RESPOND ===');
+            for (var r of inbox.requests) {
+              lines.push('[REQ #' + r.id + '] from ' + r.from_agent + ': ' + (r.content || '').substring(0, 300));
+            }
+          }
+          if (inbox.messages && inbox.messages.length > 0) {
+            lines.push('');
+            lines.push('=== NEW MESSAGES (' + inbox.messages.length + ') ===');
+            for (var m of inbox.messages) {
+              var sender = m.from_agent || '?';
+              var target = m.to_agent ? '' : ' (broadcast)';
+              lines.push('[MSG #' + m.id + '] ' + sender + target + ': ' + (m.content || '').substring(0, 300));
+            }
+          }
+        }
+        return text(lines.join('\n'));
       }
       return text('working_on set locally: "' + args.working_on + '" (admin mode — no heartbeat sent)');
     }
@@ -1619,13 +1653,23 @@ export function registerTools(server) {
 
 // (registerTools continues — GitHub, sleep/wake tools below, closed after studio_wake)
 
-function formatOverview(data) {
+function formatOverview(data, currentAgentId) {
   var lines = [];
 
-  // Agents
-  if (data.agents && data.agents.length > 0) {
+  // Agents — hide the "alter ego" agent when booting with identity.
+  // dev-claude and greatness-claude are the same operator in different modes.
+  // When one boots, the other is noise. Other same-operator agents (macbook, admin-bot) stay visible.
+  var agents = data.agents || [];
+  if (currentAgentId && agents.length > 0) {
+    var SIBLING_PAIRS = { 'dev-claude': 'greatness-claude', 'greatness-claude': 'dev-claude' };
+    var hiddenSibling = SIBLING_PAIRS[currentAgentId];
+    if (hiddenSibling) {
+      agents = agents.filter(function (a) { return a.id !== hiddenSibling; });
+    }
+  }
+  if (agents.length > 0) {
     lines.push('=== Agents ===');
-    for (var a of data.agents) {
+    for (var a of agents) {
       // Support both slim format (id, status, working_on, heartbeat) and full format
       if (a.heartbeat) {
         lines.push('[' + (a.status === 'online' ? 'ON' : 'OFF') + '] ' + a.id + (a.working_on ? ': ' + a.working_on : '') + ' (' + a.heartbeat + ')');

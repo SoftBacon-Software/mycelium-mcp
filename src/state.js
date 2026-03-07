@@ -16,10 +16,41 @@ var state = {
   // Auto-tracked working state — populates state_snapshot automatically
   claimedItem: null,    // { type, id, title } — from claim_task, claim_bug, get_work auto_claim
   currentStep: null,    // { plan_id, step_id, title } — from update_step
-  progressNotes: []     // brief notes accumulated during work
+  progressNotes: [],    // brief notes accumulated during work
+  // Pending inbox from auto-heartbeat — prepended to next tool response
+  pendingInbox: null
 };
 
 export function getState() { return state; }
+
+// Consume pending inbox — returns formatted string or null. Call from any tool response.
+export function consumePendingInbox() {
+  if (!state.pendingInbox) return null;
+  var inbox = state.pendingInbox;
+  state.pendingInbox = null;
+  var lines = [];
+  if (inbox.directives && inbox.directives.length > 0) {
+    lines.push('=== DIRECTIVES (' + inbox.directives.length + ') — MUST RESPOND ===');
+    for (var d of inbox.directives) {
+      lines.push('[DIR #' + d.id + '] from ' + d.from_agent + ': ' + (d.content || '').substring(0, 500));
+    }
+  }
+  if (inbox.requests && inbox.requests.length > 0) {
+    lines.push('=== REQUESTS (' + inbox.requests.length + ') — MUST RESPOND ===');
+    for (var r of inbox.requests) {
+      lines.push('[REQ #' + r.id + '] from ' + r.from_agent + ': ' + (r.content || '').substring(0, 500));
+    }
+  }
+  if (inbox.messages && inbox.messages.length > 0) {
+    lines.push('=== NEW MESSAGES (' + inbox.messages.length + ') ===');
+    for (var m of inbox.messages) {
+      var sender = m.from_agent || '?';
+      var target = m.to_agent ? '' : ' (broadcast)';
+      lines.push('[MSG #' + m.id + '] ' + sender + target + ': ' + (m.content || '').substring(0, 500));
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
+}
 
 export function setWorkingOn(text) {
   state.workingOn = text || '';
@@ -87,31 +118,16 @@ export async function sendHeartbeat() {
       messages_acked: JSON.stringify(state.messagesAcked),
       state_snapshot: JSON.stringify(getAutoSnapshot())
     });
-    // Surface inbox from heartbeat response
+    // Surface inbox from heartbeat response — store for next tool call
     if (result && result.inbox) {
       var inbox = result.inbox;
-      if (inbox.directives && inbox.directives.length > 0) {
-        process.stderr.write('[mycelium] *** ' + inbox.directives.length + ' PENDING DIRECTIVE(S) ***\n');
-        for (var d of inbox.directives) {
-          process.stderr.write('[mycelium]   DIRECTIVE #' + d.id + ' from ' + d.from_agent + ': ' + (d.content || '').substring(0, 120) + '\n');
-        }
+      var hasContent = (inbox.directives && inbox.directives.length > 0) ||
+        (inbox.requests && inbox.requests.length > 0) ||
+        (inbox.messages && inbox.messages.length > 0);
+      if (hasContent) {
+        state.pendingInbox = inbox;
+        process.stderr.write('[mycelium] ' + (result.pending || 0) + ' unread item(s) queued for next tool response\n');
       }
-      if (inbox.requests && inbox.requests.length > 0) {
-        process.stderr.write('[mycelium] ' + inbox.requests.length + ' pending request(s):\n');
-        for (var r of inbox.requests) {
-          process.stderr.write('[mycelium]   REQ #' + r.id + ' from ' + r.from_agent + ': ' + (r.content || '').substring(0, 120) + '\n');
-        }
-      }
-      if (inbox.messages && inbox.messages.length > 0) {
-        process.stderr.write('[mycelium] ' + inbox.messages.length + ' unread message(s):\n');
-        for (var m of inbox.messages) {
-          var sender = m.from_agent || '?';
-          var target = m.to_agent ? ' (DM)' : ' (broadcast)';
-          process.stderr.write('[mycelium]   MSG #' + m.id + ' from ' + sender + target + ': ' + (m.content || '').substring(0, 120) + '\n');
-        }
-      }
-    } else if (result && result.pending > 0) {
-      process.stderr.write('[mycelium] ' + result.pending + ' pending item(s) — call mycelium_read_messages to check\n');
     }
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
