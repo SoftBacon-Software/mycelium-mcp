@@ -164,6 +164,35 @@ export function registerTools(server) {
           }
         }
 
+        // Crash recovery
+        if (data.crash_recovery && data.crash_recovery.detected) {
+          var cr = data.crash_recovery;
+          lines.push('');
+          lines.push('*** CRASH RECOVERY ***');
+          lines.push('Previous session crashed ' + cr.stale_minutes + ' minutes ago.');
+          lines.push('Was working on: ' + (cr.was_working_on || 'unknown'));
+          if (cr.recovery_notes) lines.push('Recovery notes: ' + cr.recovery_notes);
+          lines.push('Action: Resume from where you left off. Check for partial work.');
+        }
+
+        // Calibration / drift detection
+        if (data.calibration) {
+          var cal = data.calibration;
+          if (cal.status === 'critical' || cal.status === 'drifted') {
+            lines.push('');
+            lines.push('*** DRIFT DETECTED: ' + cal.status.toUpperCase() + ' ***');
+            if (cal.drift && cal.drift.length > 0) {
+              for (var d of cal.drift) {
+                lines.push('  [' + (d.level || 'warn').toUpperCase() + '] ' + (d.detail || d));
+              }
+            }
+            lines.push('Action: Review your CLAUDE.md and fix drift issues before proceeding.');
+          } else if (cal.status === 'aligned') {
+            lines.push('');
+            lines.push('Calibration: aligned');
+          }
+        }
+
         // Savepoint
         if (data.savepoint && data.savepoint.has_savepoint) {
           var sp = data.savepoint;
