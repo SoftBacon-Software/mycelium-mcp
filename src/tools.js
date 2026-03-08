@@ -1079,6 +1079,110 @@ export function registerTools(server) {
     }
   );
 
+  // ===== TEAMS =====
+
+  registerDual(server,
+    'studio_list_teams',
+    'List teams. Optionally filter by org_id.',
+    {
+      org_id: z.string().optional().describe('Filter by organization ID')
+    },
+    async (args) => {
+      var qs = args.org_id ? '?org_id=' + encodeURIComponent(args.org_id) : '';
+      var data = await apiGet('/teams' + qs);
+      var teams = data.teams || data;
+      if (!teams.length) return text('No teams found.');
+      var lines = ['=== Teams (' + teams.length + ') ==='];
+      for (var t of teams) {
+        lines.push(t.id + ' — ' + t.name + ' (org: ' + t.org_id + ')' + (t.member_count ? ' [' + t.member_count + ' members]' : ''));
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_get_team',
+    'Get a single team by ID, including members and projects.',
+    {
+      team_id: z.string().describe('Team ID')
+    },
+    async (args) => {
+      var team = await apiGet('/teams/' + encodeURIComponent(args.team_id));
+      var lines = [
+        'Team: ' + team.id + ' — ' + team.name,
+        'Org: ' + team.org_id,
+        'Description: ' + (team.description || '(none)')
+      ];
+      if (team.members && team.members.length) {
+        lines.push('\nMembers (' + team.members.length + '):');
+        for (var m of team.members) {
+          lines.push('  ' + m.user_id + ' [' + m.user_type + '] role=' + m.role + (m.is_primary ? ' (primary)' : ''));
+        }
+      }
+      if (team.projects && team.projects.length) {
+        lines.push('\nProjects (' + team.projects.length + '):');
+        for (var p of team.projects) {
+          lines.push('  ' + (typeof p === 'string' ? p : p.id + ' — ' + (p.name || '')));
+        }
+      }
+      return text(lines.join('\n'));
+    }
+  );
+
+  registerDual(server,
+    'studio_create_team',
+    'Create a new team within an organization.',
+    {
+      id: z.string().describe('Team slug ID (e.g. platform)'),
+      name: z.string().describe('Display name'),
+      org_id: z.string().describe('Organization ID'),
+      description: z.string().optional().describe('Team description')
+    },
+    async (args) => {
+      var result = await apiPost('/teams', {
+        id: args.id,
+        name: args.name,
+        org_id: args.org_id,
+        description: args.description || ''
+      });
+      return text('Team created: ' + result.id + ' — ' + result.name);
+    }
+  );
+
+  registerDual(server,
+    'studio_add_team_member',
+    'Add a member (operator or agent) to a team.',
+    {
+      team_id: z.string().describe('Team ID'),
+      user_id: z.string().describe('Operator or agent ID'),
+      user_type: z.enum(['operator', 'agent']).describe('Whether this is an operator (person) or agent'),
+      role: z.enum(['lead', 'member', 'guest']).optional().describe('Team role (default: member)'),
+      is_primary: z.boolean().optional().describe('Whether this is the user\'s primary team')
+    },
+    async (args) => {
+      var result = await apiPost('/teams/' + encodeURIComponent(args.team_id) + '/members', {
+        user_id: args.user_id,
+        user_type: args.user_type,
+        role: args.role || 'member',
+        is_primary: args.is_primary || false
+      });
+      return text('Added ' + args.user_id + ' to team ' + args.team_id + ' as ' + (args.role || 'member'));
+    }
+  );
+
+  registerDual(server,
+    'studio_remove_team_member',
+    'Remove a member from a team.',
+    {
+      team_id: z.string().describe('Team ID'),
+      user_id: z.string().describe('Operator or agent ID to remove')
+    },
+    async (args) => {
+      await apiDelete('/teams/' + encodeURIComponent(args.team_id) + '/members/' + encodeURIComponent(args.user_id));
+      return text('Removed ' + args.user_id + ' from team ' + args.team_id);
+    }
+  );
+
   // ===== APPROVAL GATES =====
 
   registerDual(server,
