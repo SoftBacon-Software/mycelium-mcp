@@ -206,6 +206,40 @@ export function registerTools(server) {
           lines.push('Changes: ' + data.changes_since_last);
         }
 
+        // Surface pending/approved approvals
+        if (data.my_approvals && data.my_approvals.length > 0) {
+          lines.push('');
+          lines.push('=== YOUR APPROVALS (' + data.my_approvals.length + ') ===');
+          for (var appr of data.my_approvals) {
+            var apStatus = (appr.status || 'pending').toUpperCase();
+            var apAction = appr.status === 'approved' ? ' — execute now' : ' — waiting for human approval';
+            lines.push('[' + apStatus + ' #' + appr.id + '] ' + (appr.action_type || '?') + ': ' + (appr.title || '') + apAction);
+          }
+        }
+
+        // Fetch governance rulesets linked to agent's project
+        if (proj) {
+          try {
+            var concepts = await apiGet('/projects/' + proj + '/concepts');
+            var rulesets = (concepts || []).filter(function(c) { return c.type === 'ruleset'; });
+            if (rulesets.length > 0) {
+              lines.push('');
+              lines.push('=== GOVERNANCE RULES (from network — these override MEMORY.md) ===');
+              for (var rs of rulesets) {
+                lines.push('[Ruleset #' + rs.id + '] ' + rs.name);
+                try {
+                  var rdata = typeof rs.data === 'string' ? JSON.parse(rs.data) : rs.data;
+                  if (rdata && rdata.rules) {
+                    for (var rule of rdata.rules) {
+                      lines.push('  [' + (rule.severity || 'hard').toUpperCase() + '] ' + rule.id + ': ' + rule.rule);
+                    }
+                  }
+                } catch(e) { /* skip malformed data */ }
+              }
+            }
+          } catch(e) { /* concepts fetch failed, non-fatal */ }
+        }
+
         lines.push('', 'Auto-heartbeat started. Server time: ' + data.server_time);
         return text(lines.join('\n'));
       }
@@ -213,7 +247,29 @@ export function registerTools(server) {
       // Admin mode — request verbose format (slim boot removed full data)
       var overview = await apiGet('/admin/overview?verbose=true');
       var identity = st.agentId ? 'You are: ' + st.agentId + ' (admin mode)\n\n' : '';
-      return text(identity + formatOverview(overview, st.agentId));
+
+      // Fetch governance rulesets for admin boot too
+      var govLines = '';
+      try {
+        var allConcepts = await apiGet('/concepts?type=ruleset');
+        if (allConcepts && allConcepts.length > 0) {
+          var govParts = ['\n=== GOVERNANCE RULES (from network — these override MEMORY.md) ==='];
+          for (var rs of allConcepts) {
+            govParts.push('[Ruleset #' + rs.id + '] ' + rs.name);
+            try {
+              var rdata = typeof rs.data === 'string' ? JSON.parse(rs.data) : rs.data;
+              if (rdata && rdata.rules) {
+                for (var rule of rdata.rules) {
+                  govParts.push('  [' + (rule.severity || 'hard').toUpperCase() + '] ' + rule.id + ': ' + rule.rule);
+                }
+              }
+            } catch(e) { /* skip malformed */ }
+          }
+          govLines = govParts.join('\n') + '\n';
+        }
+      } catch(e) { /* non-fatal */ }
+
+      return text(identity + formatOverview(overview, st.agentId) + govLines);
     }
   );
 
@@ -240,7 +296,7 @@ export function registerTools(server) {
       var lines = [];
       var autoClaim = params && params.auto_claim;
 
-      if (st.role === 'agent' && st.agentId) {
+      if (st.agentId) {
         var endpoint = '/work/' + st.agentId + (autoClaim ? '?auto_claim=true' : '');
         var data = await apiGet(endpoint);
         var queue = data.queue || data.work_queue || [];
@@ -310,7 +366,7 @@ export function registerTools(server) {
       // Auto-update working_on and track claimed item
       setWorkingOn(task.title);
       setClaimedItem({ type: 'task', id: args.task_id, title: task.title });
-      if (st.role === 'agent') await sendHeartbeat();
+      if (st.agentId) await sendHeartbeat();
 
       return text('Claimed task #' + args.task_id + ': ' + task.title + '\nworking_on updated to: "' + task.title + '"');
     }
@@ -333,7 +389,7 @@ export function registerTools(server) {
 
       // Find next task (use /work/ to avoid emitting a spurious agent_boot event)
       var nextWork = '';
-      if (st.role === 'agent' && st.agentId) {
+      if (st.agentId) {
         try {
           var workData = await apiGet('/work/' + st.agentId);
           if (workData.tasks.length) {
@@ -343,7 +399,7 @@ export function registerTools(server) {
       }
 
       setWorkingOn(nextWork);
-      if (st.role === 'agent') await sendHeartbeat();
+      if (st.agentId) await sendHeartbeat();
 
       var msg = 'Completed task #' + args.task_id + '.';
       if (nextWork) msg += '\nworking_on advanced to: "' + nextWork + '"';
@@ -664,7 +720,7 @@ export function registerTools(server) {
       });
       setWorkingOn('Bug #' + args.bug_id + ': ' + bug.title);
       setClaimedItem({ type: 'bug', id: args.bug_id, title: bug.title });
-      if (st.role === 'agent') await sendHeartbeat();
+      if (st.agentId) await sendHeartbeat();
       return text('Claimed bug #' + args.bug_id + ': ' + bug.title);
     }
   );
@@ -686,14 +742,14 @@ export function registerTools(server) {
       // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event)
       var st = getState();
       var nextWork = '';
-      if (st.role === 'agent' && st.agentId) {
+      if (st.agentId) {
         try {
           var workData = await apiGet('/work/' + st.agentId);
           if (workData.tasks.length) nextWork = workData.tasks[0].title;
         } catch { /* ignore */ }
       }
       setWorkingOn(nextWork);
-      if (st.role === 'agent') await sendHeartbeat();
+      if (st.agentId) await sendHeartbeat();
       return text('Bug #' + args.bug_id + ' marked fixed.' +
         (nextWork ? '\nworking_on: "' + nextWork + '"' : '\nworking_on cleared.'));
     }
@@ -710,12 +766,15 @@ export function registerTools(server) {
       state_snapshot: z.string().optional().describe('JSON snapshot of custom session state to persist')
     },
     async (args) => {
+      var st = getState();
       setWorkingOn(args.working_on);
-      if (getState().role === 'agent') {
+      if (st.agentId) {
         // Send heartbeat with savepoint data
         var body = { status: 'online', working_on: args.working_on };
         if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
         if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
+        // Admin mode: include agent_id so server attributes heartbeat correctly
+        if (st.role !== 'agent') body.agent_id = st.agentId;
         var result = await apiPost('/agents/heartbeat', body);
         var lines = ['Heartbeat sent. working_on: "' + (args.working_on || '') + '"'];
         if (result && result.pending > 0) lines[0] += ' | ' + result.pending + ' pending';
@@ -750,9 +809,18 @@ export function registerTools(server) {
             }
           }
         }
+        // Surface approvals
+        if (result && result.approvals && result.approvals.length > 0) {
+          lines.push('');
+          lines.push('=== YOUR APPROVALS (' + result.approvals.length + ') ===');
+          for (var ap of result.approvals) {
+            var apLabel = (ap.status || 'pending').toUpperCase();
+            lines.push('[' + apLabel + ' #' + ap.id + '] ' + (ap.action_type || '?') + ': ' + (ap.title || ''));
+          }
+        }
         return text(lines.join('\n'));
       }
-      return text('working_on set locally: "' + args.working_on + '" (admin mode — no heartbeat sent)');
+      return text('working_on set locally: "' + args.working_on + '" (no agentId configured — no heartbeat sent)');
     }
   );
 

@@ -49,6 +49,13 @@ export function consumePendingInbox() {
       lines.push('[MSG #' + m.id + '] ' + sender + target + ': ' + (m.content || '').substring(0, 500));
     }
   }
+  if (inbox.approvals && inbox.approvals.length > 0) {
+    lines.push('=== YOUR APPROVALS (' + inbox.approvals.length + ') ===');
+    for (var a of inbox.approvals) {
+      var label = (a.status || 'pending').toUpperCase();
+      lines.push('[' + label + ' #' + a.id + '] ' + (a.action_type || '?') + ': ' + (a.title || ''));
+    }
+  }
   return lines.length > 0 ? lines.join('\n') : null;
 }
 
@@ -109,15 +116,18 @@ export function getAutoSnapshot() {
 }
 
 export async function sendHeartbeat() {
-  if (state.role !== 'agent' || !state.agentId) return;
+  if (!state.agentId) return;
   try {
-    var result = await apiPost('/agents/heartbeat', {
+    var body = {
       status: 'online',
       working_on: state.workingOn,
       session_id: state.sessionId,
       messages_acked: JSON.stringify(state.messagesAcked),
       state_snapshot: JSON.stringify(getAutoSnapshot())
-    });
+    };
+    // Admin mode: include agent_id so server attributes heartbeat correctly
+    if (state.role !== 'agent') body.agent_id = state.agentId;
+    var result = await apiPost('/agents/heartbeat', body);
     // Surface inbox from heartbeat response — store for next tool call
     if (result && result.inbox) {
       var inbox = result.inbox;
@@ -129,6 +139,11 @@ export async function sendHeartbeat() {
         process.stderr.write('[mycelium] ' + (result.pending || 0) + ' unread item(s) queued for next tool response\n');
       }
     }
+    // Surface approvals from heartbeat response
+    if (result && result.approvals && result.approvals.length > 0) {
+      if (!state.pendingInbox) state.pendingInbox = {};
+      state.pendingInbox.approvals = result.approvals;
+    }
   } catch (e) {
     process.stderr.write('Heartbeat failed: ' + e.message + '\n');
   }
@@ -139,7 +154,7 @@ export function setMcpServer(mcpServer) {
 }
 
 export function startHeartbeat(mcpServer) {
-  if (state.role !== 'agent') return;
+  if (!state.agentId) return;
   if (mcpServer) state.mcpServer = mcpServer;
   stopHeartbeat();
   // Heartbeat every 5 minutes (boot already marks agent online — no need to send immediately)
@@ -160,7 +175,7 @@ export function stopHeartbeat() {
 export async function shutdown() {
   stopHeartbeat();
   stopSSE();
-  if (state.role === 'agent' && state.agentId) {
+  if (state.agentId) {
     // Auto-save session summary
     try {
       var sessionData = {
@@ -174,10 +189,9 @@ export async function shutdown() {
 
     // Clear working_on on shutdown
     try {
-      await apiPost('/agents/heartbeat', {
-        status: 'offline',
-        working_on: ''
-      });
+      var offlineBody = { status: 'offline', working_on: '' };
+      if (state.role !== 'agent') offlineBody.agent_id = state.agentId;
+      await apiPost('/agents/heartbeat', offlineBody);
     } catch { /* best effort */ }
   }
 }
