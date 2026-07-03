@@ -10,10 +10,13 @@ import assert from 'node:assert/strict';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 
-// Build the source list at RUNTIME: index.js plus every *.js in src/.
-// No hardcoded allowlist — a src file added later can never silently bypass the gate.
-const srcModules = readdirSync(resolve(root, 'src'))
-  .filter((f) => f.endsWith('.js'))
+// Build the source list at RUNTIME: index.js plus every *.js in src/, RECURSIVELY.
+// No hardcoded allowlist — a src file added later (even in a nested dir like
+// src/controllers/x.js) can never silently bypass the gate.
+// Node >= 20: readdirSync({recursive:true}) yields paths relative to src/, possibly nested.
+const srcModules = readdirSync(resolve(root, 'src'), { recursive: true })
+  .filter((f) => typeof f === 'string' && f.endsWith('.js'))
+  .map((f) => f.split('\\').join('/'))   // normalize separators (nested entries on win32)
   .sort()
   .map((f) => `src/${f}`);
 const SOURCE_FILES = ['index.js', ...srcModules];
