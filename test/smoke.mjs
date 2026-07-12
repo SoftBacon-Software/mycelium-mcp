@@ -1,11 +1,12 @@
 // Smoke gate for mycelium-mcp.
 // No test framework, no dependencies — Node builtins only.
 // Exits 0 only if every source file parses AND the key exports resolve.
+
+import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -16,7 +17,7 @@ const root = resolve(here, '..');
 // Node >= 20: readdirSync({recursive:true}) yields paths relative to src/, possibly nested.
 const srcModules = readdirSync(resolve(root, 'src'), { recursive: true })
   .filter((f) => typeof f === 'string' && f.endsWith('.js'))
-  .map((f) => f.split('\\').join('/'))   // normalize separators (nested entries on win32)
+  .map((f) => f.split('\\').join('/')) // normalize separators (nested entries on win32)
   .sort()
   .map((f) => `src/${f}`);
 const SOURCE_FILES = ['index.js', ...srcModules];
@@ -51,7 +52,14 @@ for (const rel of srcModules) {
 
 // --- Phase 2b: key exports must resolve (named-export assertions) ---
 const state = await import('../src/state.js');
-for (const name of ['getState', 'setWorkingOn', 'setBooted', 'startHeartbeat', 'sendHeartbeat', 'shutdown']) {
+for (const name of [
+  'getState',
+  'setWorkingOn',
+  'setBooted',
+  'startHeartbeat',
+  'sendHeartbeat',
+  'shutdown',
+]) {
   assert.equal(typeof state[name], 'function', `src/state.js missing export: ${name}`);
   checks++;
 }

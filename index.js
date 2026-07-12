@@ -4,12 +4,12 @@
 // Wraps the Mycelium API with native tools for AI agents.
 // Two modes: admin (full access) and agent (scoped, auto-heartbeat).
 
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { registerTools, registerPluginTools } from './src/tools.js';
-import { shutdown, startHeartbeat } from './src/state.js';
 import { startSSE } from './src/sse.js';
+import { shutdown, startHeartbeat } from './src/state.js';
+import { registerPluginTools, registerTools } from './src/tools.js';
 
 // Single source of truth for the version — a hardcoded copy here drifted from
 // package.json before; reading it keeps `npm version` bumps automatic.
@@ -31,7 +31,7 @@ if (role === 'agent' && !agentId) {
 
 var server = new McpServer({
   name: 'mycelium-mcp',
-  version: pkg.version
+  version: pkg.version,
 });
 
 registerTools(server);
@@ -43,8 +43,14 @@ async function shutdownOnce() {
   shuttingDown = true;
   await shutdown();
 }
-process.on('SIGINT', async () => { await shutdownOnce(); process.exit(0); });
-process.on('SIGTERM', async () => { await shutdownOnce(); process.exit(0); });
+process.on('SIGINT', async () => {
+  await shutdownOnce();
+  process.exit(0);
+});
+process.on('SIGTERM', async () => {
+  await shutdownOnce();
+  process.exit(0);
+});
 
 // Connect FIRST so Claude Code can handshake immediately
 var transport = new StdioServerTransport();
@@ -64,11 +70,11 @@ server.server.onclose = exitOnDisconnect;
 process.stdin.on('end', exitOnDisconnect);
 process.stdin.on('close', exitOnDisconnect);
 
-process.stderr.write('Mycelium MCP server running (' + role + (agentId ? ':' + agentId : '') + ')\n');
+process.stderr.write(`Mycelium MCP server running (${role}${agentId ? `:${agentId}` : ''})\n`);
 
 // Register plugin tools after transport is connected so startup isn't blocked by network
-registerPluginTools(server).catch(function(err) {
-  process.stderr.write('Plugin tool registration error: ' + err.message + '\n');
+registerPluginTools(server).catch((err) => {
+  process.stderr.write(`Plugin tool registration error: ${err.message}\n`);
 });
 
 // Start heartbeat (agent) or SSE-only (admin) so sleep_mode_on can wake this session

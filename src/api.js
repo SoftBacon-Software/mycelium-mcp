@@ -1,8 +1,8 @@
 // HTTP client for the Mycelium API
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Read key from settings.json as ground truth — env vars from Claude Code can be stale
 function resolveKey() {
@@ -10,8 +10,8 @@ function resolveKey() {
   try {
     var settingsPath = join(homedir(), '.claude', 'settings.json');
     var settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
-    var mcpEnv = settings.mcpServers && settings.mcpServers.mycelium && settings.mcpServers.mycelium.env;
-    if (mcpEnv && mcpEnv.MYCELIUM_API_KEY) return mcpEnv.MYCELIUM_API_KEY;
+    var mcpEnv = settings.mcpServers?.mycelium?.env;
+    if (mcpEnv?.MYCELIUM_API_KEY) return mcpEnv.MYCELIUM_API_KEY;
   } catch {}
   return envKey;
 }
@@ -37,7 +37,7 @@ function authHeaders() {
 async function request(method, path, body, reqOpts) {
   var url = API_URL + path;
   var headers = { ...authHeaders() };
-  var timeoutMs = (reqOpts && reqOpts.timeoutMs) || TIMEOUT_MS;
+  var timeoutMs = reqOpts?.timeoutMs || TIMEOUT_MS;
   var opts = { method, headers, signal: AbortSignal.timeout(timeoutMs) };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -50,25 +50,37 @@ async function request(method, path, body, reqOpts) {
     // Bare fetch errors ("fetch failed", "This operation was aborted") don't
     // say WHERE — name the endpoint so a substrate-down error is diagnosable.
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      throw new Error('Mycelium API timeout after ' + timeoutMs + 'ms (' + method + ' ' + url + ')');
+      throw new Error(`Mycelium API timeout after ${timeoutMs}ms (${method} ${url})`);
     }
-    var cause = (err.cause && err.cause.message) ? ' — ' + err.cause.message : '';
-    throw new Error('Mycelium API unreachable (' + method + ' ' + url + '): ' + err.message + cause);
+    var cause = err.cause?.message ? ` — ${err.cause.message}` : '';
+    throw new Error(`Mycelium API unreachable (${method} ${url}): ${err.message}${cause}`);
   }
   var text = await res.text();
   var data;
-  try { data = JSON.parse(text); } catch { data = text; }
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = text;
+  }
   if (!res.ok) {
     // Prefer the server's error field; truncate raw bodies (proxy HTML error
     // pages can be huge) and always include the status code.
-    var detail = (data && data.error) || (text || '').slice(0, 500) || res.statusText;
-    throw new Error('HTTP ' + res.status + ': ' + detail);
+    var detail = data?.error || (text || '').slice(0, 500) || res.statusText;
+    throw new Error(`HTTP ${res.status}: ${detail}`);
   }
   return data;
 }
 
-export function apiGet(path, opts) { return request('GET', path, undefined, opts); }
-export function apiPost(path, body, opts) { return request('POST', path, body, opts); }
-export function apiPut(path, body, opts) { return request('PUT', path, body, opts); }
-export function apiDelete(path, opts) { return request('DELETE', path, undefined, opts); }
-export { API_URL, API_KEY, ROLE };
+export function apiGet(path, opts) {
+  return request('GET', path, undefined, opts);
+}
+export function apiPost(path, body, opts) {
+  return request('POST', path, body, opts);
+}
+export function apiPut(path, body, opts) {
+  return request('PUT', path, body, opts);
+}
+export function apiDelete(path, opts) {
+  return request('DELETE', path, undefined, opts);
+}
+export { API_KEY, API_URL, ROLE };

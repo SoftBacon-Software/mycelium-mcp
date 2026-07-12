@@ -14,14 +14,16 @@ var state = {
   sessionId: null,
   customState: {},
   // Auto-tracked working state — populates state_snapshot automatically
-  claimedItem: null,    // { type, id, title } — from claim_task, claim_bug, get_work auto_claim
-  currentStep: null,    // { plan_id, step_id, title } — from update_step
-  progressNotes: [],    // brief notes accumulated during work
+  claimedItem: null, // { type, id, title } — from claim_task, claim_bug, get_work auto_claim
+  currentStep: null, // { plan_id, step_id, title } — from update_step
+  progressNotes: [], // brief notes accumulated during work
   // Pending inbox from auto-heartbeat — prepended to next tool response
-  pendingInbox: null
+  pendingInbox: null,
 };
 
-export function getState() { return state; }
+export function getState() {
+  return state;
+}
 
 // Consume pending inbox — returns formatted string or null. Call from any tool response.
 export function consumePendingInbox() {
@@ -30,30 +32,30 @@ export function consumePendingInbox() {
   state.pendingInbox = null;
   var lines = [];
   if (inbox.directives && inbox.directives.length > 0) {
-    lines.push('=== DIRECTIVES (' + inbox.directives.length + ') — MUST RESPOND ===');
+    lines.push(`=== DIRECTIVES (${inbox.directives.length}) — MUST RESPOND ===`);
     for (var d of inbox.directives) {
-      lines.push('[DIR #' + d.id + '] from ' + d.from_agent + ': ' + (d.content || '').substring(0, 500));
+      lines.push(`[DIR #${d.id}] from ${d.from_agent}: ${(d.content || '').substring(0, 500)}`);
     }
   }
   if (inbox.requests && inbox.requests.length > 0) {
-    lines.push('=== REQUESTS (' + inbox.requests.length + ') — MUST RESPOND ===');
+    lines.push(`=== REQUESTS (${inbox.requests.length}) — MUST RESPOND ===`);
     for (var r of inbox.requests) {
-      lines.push('[REQ #' + r.id + '] from ' + r.from_agent + ': ' + (r.content || '').substring(0, 500));
+      lines.push(`[REQ #${r.id}] from ${r.from_agent}: ${(r.content || '').substring(0, 500)}`);
     }
   }
   if (inbox.messages && inbox.messages.length > 0) {
-    lines.push('=== NEW MESSAGES (' + inbox.messages.length + ') ===');
+    lines.push(`=== NEW MESSAGES (${inbox.messages.length}) ===`);
     for (var m of inbox.messages) {
       var sender = m.from_agent || '?';
       var target = m.to_agent ? '' : ' (broadcast)';
-      lines.push('[MSG #' + m.id + '] ' + sender + target + ': ' + (m.content || '').substring(0, 500));
+      lines.push(`[MSG #${m.id}] ${sender}${target}: ${(m.content || '').substring(0, 500)}`);
     }
   }
   if (inbox.approvals && inbox.approvals.length > 0) {
-    lines.push('=== YOUR APPROVALS (' + inbox.approvals.length + ') ===');
+    lines.push(`=== YOUR APPROVALS (${inbox.approvals.length}) ===`);
     for (var a of inbox.approvals) {
       var label = (a.status || 'pending').toUpperCase();
-      lines.push('[' + label + ' #' + a.id + '] ' + (a.action_type || '?') + ': ' + (a.title || ''));
+      lines.push(`[${label} #${a.id}] ${a.action_type || '?'}: ${a.title || ''}`);
     }
   }
   return lines.length > 0 ? lines.join('\n') : null;
@@ -68,7 +70,7 @@ export function setBooted(bootData) {
   state.bootData = bootData;
   // Generate session ID on first boot
   if (!state.sessionId) {
-    state.sessionId = state.agentId + '-' + Date.now().toString(36);
+    state.sessionId = `${state.agentId}-${Date.now().toString(36)}`;
   }
   // Track message IDs from boot data
   if (bootData.new_messages) {
@@ -123,29 +125,32 @@ export async function sendHeartbeat() {
       working_on: state.workingOn,
       session_id: state.sessionId,
       messages_acked: JSON.stringify(state.messagesAcked),
-      state_snapshot: JSON.stringify(getAutoSnapshot())
+      state_snapshot: JSON.stringify(getAutoSnapshot()),
     };
     // Admin mode: include agent_id so server attributes heartbeat correctly
     if (state.role !== 'agent') body.agent_id = state.agentId;
     var result = await apiPost('/agents/heartbeat', body);
     // Surface inbox from heartbeat response — store for next tool call
-    if (result && result.inbox) {
+    if (result?.inbox) {
       var inbox = result.inbox;
-      var hasContent = (inbox.directives && inbox.directives.length > 0) ||
+      var hasContent =
+        (inbox.directives && inbox.directives.length > 0) ||
         (inbox.requests && inbox.requests.length > 0) ||
         (inbox.messages && inbox.messages.length > 0);
       if (hasContent) {
         state.pendingInbox = inbox;
-        process.stderr.write('[mycelium] ' + (result.pending || 0) + ' unread item(s) queued for next tool response\n');
+        process.stderr.write(
+          `[mycelium] ${result.pending || 0} unread item(s) queued for next tool response\n`,
+        );
       }
     }
     // Surface approvals from heartbeat response
-    if (result && result.approvals && result.approvals.length > 0) {
+    if (result?.approvals && result.approvals.length > 0) {
       if (!state.pendingInbox) state.pendingInbox = {};
       state.pendingInbox.approvals = result.approvals;
     }
   } catch (e) {
-    process.stderr.write('Heartbeat failed: ' + e.message + '\n');
+    process.stderr.write(`Heartbeat failed: ${e.message}\n`);
   }
 }
 
@@ -184,18 +189,26 @@ export async function shutdown() {
     try {
       var sessionData = {
         working_on: state.workingOn || '',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
-      await apiPut('/context/keys/' + state.agentId + '/last_session', {
-        value: JSON.stringify(sessionData)
-      }, quick);
-    } catch (e) { /* best effort */ }
+      await apiPut(
+        `/context/keys/${state.agentId}/last_session`,
+        {
+          value: JSON.stringify(sessionData),
+        },
+        quick,
+      );
+    } catch (_e) {
+      /* best effort */
+    }
 
     // Clear working_on on shutdown
     try {
       var offlineBody = { status: 'offline', working_on: '' };
       if (state.role !== 'agent') offlineBody.agent_id = state.agentId;
       await apiPost('/agents/heartbeat', offlineBody, quick);
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 }
