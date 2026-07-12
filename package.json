@@ -9,8 +9,19 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs && node test/handlers.test.mjs"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SoftBacon-Software/mycelium-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SoftBacon-Software/mycelium-mcp/issues"
+  },
+  "homepage": "https://github.com/SoftBacon-Software/mycelium-mcp#readme",
   "keywords": [
     "mcp",
     "mycelium",

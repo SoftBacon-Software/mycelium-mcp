@@ -2,7 +2,7 @@
 
 ## What This Is
 
-MCP (Model Context Protocol) server that wraps the Mycelium platform API as native Claude Code tools. Package name: `mycelium-mcp`. Gives Claude agents tools like `mycelium_boot`, `mycelium_claim_task`, `mycelium_heartbeat` instead of raw curl commands. Legacy `studio_*` tool names still work as aliases.
+MCP (Model Context Protocol) server that wraps the Mycelium platform API as native Claude Code tools. Package name: `mycelium-mcp`. Gives Claude agents tools like `mycelium_boot`, `mycelium_claim_task`, `mycelium_heartbeat` instead of raw curl commands. (Tools are defined internally under legacy `studio_*` names and registered as `mycelium_*` only — the `studio_*` aliases were dropped to stay under MCP tool limits.)
 
 ## Critical Rules
 
@@ -16,19 +16,24 @@ MCP (Model Context Protocol) server that wraps the Mycelium platform API as nati
 ```bash
 node index.js                    # Run MCP server (stdio transport)
 npm install                      # Install dependencies
+npm test                         # smoke gate + handler tests (no framework, Node builtins only)
 ```
 
-No tests or linting configured.
+Tests: `test/smoke.mjs` (syntax/import/export gate over every source file) and
+`test/handlers.test.mjs` (api client + tool handlers against a local mock
+substrate, plus an entry-point boot/shutdown gate). Run green before any publish.
 
 ## Layout
 
 ```
-index.js          # Entry point — MCP server setup, env validation
+index.js          # Entry point — MCP server setup, env validation, shutdown wiring
 src/
-  api.js          # HTTP client for Mycelium API (fetch wrapper)
+  api.js          # HTTP client for Mycelium API (fetch wrapper, timeouts, error context)
   state.js        # Session state, auto-heartbeat (5min interval)
+  sse.js          # SSE event stream client (reconnect with backoff)
   tools.js        # All MCP tool definitions and handlers
-package.json      # mycelium-mcp v1.2.0
+test/             # npm test — zero-dependency gates (not published to npm)
+package.json      # mycelium-mcp
 ```
 
 ## Architecture
@@ -36,7 +41,7 @@ package.json      # mycelium-mcp v1.2.0
 - **Transport**: stdio (standard MCP pattern)
 - **Two modes**: `admin` (full access, X-Admin-Key) and `agent` (scoped, X-Agent-Key, auto-heartbeat)
 - **API target**: Defaults to `https://mycelium.fyi/api/mycelium`. Configurable via `MYCELIUM_API_URL`.
-- **Tool naming**: All tools registered with `mycelium_*` prefix. Legacy `studio_*` aliases also registered.
+- **Tool naming**: All tools registered with `mycelium_*` prefix only (legacy `studio_*` names exist in source but are not registered — dropped to stay under tool limits).
 - **Auto-heartbeat**: In agent mode, sends heartbeat every 5 minutes. Clears `working_on` on shutdown.
 
 ## Environment Variables
@@ -47,6 +52,7 @@ package.json      # mycelium-mcp v1.2.0
 | `MYCELIUM_ROLE` | No | `admin` (default) or `agent` |
 | `MYCELIUM_AGENT_ID` | Agent mode | Agent identifier (e.g. `greatness-claude`) |
 | `MYCELIUM_API_URL` | No | API base URL (default: `https://mycelium.fyi/api/mycelium`) |
+| `MYCELIUM_TIMEOUT_MS` | No | Per-request timeout in ms (default: `30000`) |
 
 ## Configuration
 

@@ -20,6 +20,9 @@ const API_URL = process.env.MYCELIUM_API_URL || 'https://mycelium.fyi/api/myceli
 const API_KEY = resolveKey();
 const ROLE = process.env.MYCELIUM_ROLE || 'admin';
 const AGENT_ID = process.env.MYCELIUM_AGENT_ID || '';
+// Per-request timeout. Without one, a hung substrate hangs every tool call
+// (and shutdown) indefinitely — the MCP session just looks dead.
+const TIMEOUT_MS = parseInt(process.env.MYCELIUM_TIMEOUT_MS, 10) || 30000;
 
 function authHeaders() {
   if (ROLE === 'admin') {
@@ -31,27 +34,41 @@ function authHeaders() {
   return { 'X-Agent-Key': API_KEY };
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, reqOpts) {
   var url = API_URL + path;
   var headers = { ...authHeaders() };
-  var opts = { method, headers };
+  var timeoutMs = (reqOpts && reqOpts.timeoutMs) || TIMEOUT_MS;
+  var opts = { method, headers, signal: AbortSignal.timeout(timeoutMs) };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  var res = await fetch(url, opts);
+  var res;
+  try {
+    res = await fetch(url, opts);
+  } catch (err) {
+    // Bare fetch errors ("fetch failed", "This operation was aborted") don't
+    // say WHERE — name the endpoint so a substrate-down error is diagnosable.
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      throw new Error('Mycelium API timeout after ' + timeoutMs + 'ms (' + method + ' ' + url + ')');
+    }
+    var cause = (err.cause && err.cause.message) ? ' — ' + err.cause.message : '';
+    throw new Error('Mycelium API unreachable (' + method + ' ' + url + '): ' + err.message + cause);
+  }
   var text = await res.text();
   var data;
   try { data = JSON.parse(text); } catch { data = text; }
   if (!res.ok) {
-    var msg = (data && data.error) || text || ('HTTP ' + res.status);
-    throw new Error(msg);
+    // Prefer the server's error field; truncate raw bodies (proxy HTML error
+    // pages can be huge) and always include the status code.
+    var detail = (data && data.error) || (text || '').slice(0, 500) || res.statusText;
+    throw new Error('HTTP ' + res.status + ': ' + detail);
   }
   return data;
 }
 
-export function apiGet(path) { return request('GET', path); }
-export function apiPost(path, body) { return request('POST', path, body); }
-export function apiPut(path, body) { return request('PUT', path, body); }
-export function apiDelete(path) { return request('DELETE', path); }
+export function apiGet(path, opts) { return request('GET', path, undefined, opts); }
+export function apiPost(path, body, opts) { return request('POST', path, body, opts); }
+export function apiPut(path, body, opts) { return request('PUT', path, body, opts); }
+export function apiDelete(path, opts) { return request('DELETE', path, undefined, opts); }
 export { API_URL, API_KEY, ROLE };

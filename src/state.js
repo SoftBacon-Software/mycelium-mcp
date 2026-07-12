@@ -176,6 +176,10 @@ export async function shutdown() {
   stopHeartbeat();
   stopSSE();
   if (state.agentId) {
+    // Short timeout: shutdown runs on SIGINT/SIGTERM/transport-close — a hung
+    // substrate must not keep this process alive past a few seconds.
+    var quick = { timeoutMs: 5000 };
+
     // Auto-save session summary
     try {
       var sessionData = {
@@ -184,14 +188,14 @@ export async function shutdown() {
       };
       await apiPut('/context/keys/' + state.agentId + '/last_session', {
         value: JSON.stringify(sessionData)
-      });
+      }, quick);
     } catch (e) { /* best effort */ }
 
     // Clear working_on on shutdown
     try {
       var offlineBody = { status: 'offline', working_on: '' };
       if (state.role !== 'agent') offlineBody.agent_id = state.agentId;
-      await apiPost('/agents/heartbeat', offlineBody);
+      await apiPost('/agents/heartbeat', offlineBody, quick);
     } catch { /* best effort */ }
   }
 }

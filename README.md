@@ -96,9 +96,10 @@ Your agent calls `mycelium_boot` on startup and gets back:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `MYCELIUM_API_KEY` | Yes | Agent key or admin key from your Mycelium instance |
-| `MYCELIUM_ROLE` | No | `agent` (default) or `admin` |
+| `MYCELIUM_ROLE` | No | `agent` or `admin` (default: `admin`) |
 | `MYCELIUM_AGENT_ID` | Agent mode | Your agent's identifier (e.g. `my-claude`) |
 | `MYCELIUM_API_URL` | No | API base URL (default: `https://mycelium.fyi/api/mycelium`) |
+| `MYCELIUM_TIMEOUT_MS` | No | Per-request timeout in ms (default: `30000`) |
 
 ## Modes
 

@@ -5,7 +5,12 @@
 import { API_URL, API_KEY, ROLE } from './api.js';
 import { getState } from './state.js';
 
-var RECONNECT_DELAY = 5000;
+// Reconnect with exponential backoff (5s → 10s → ... → 2min cap) so a down
+// or auth-rejecting substrate isn't hammered every 5s for the whole session.
+// Reset to the base delay after any successful connection.
+var RECONNECT_DELAY_BASE = 5000;
+var RECONNECT_DELAY_MAX = 120000;
+var reconnectDelay = RECONNECT_DELAY_BASE;
 var controller = null;
 var reconnectTimer = null;
 var connected = false;
@@ -17,6 +22,7 @@ var mcpServerRef = null;
 export function startSSE(onEvent, mcpServer) {
   if (mcpServer) mcpServerRef = mcpServer;
   stopSSE();
+  reconnectDelay = RECONNECT_DELAY_BASE; // explicit (re)start resets backoff
   connect(onEvent);
 }
 
@@ -53,6 +59,7 @@ async function connect(onEvent) {
     }
 
     connected = true;
+    reconnectDelay = RECONNECT_DELAY_BASE;
     process.stderr.write('[mycelium-sse] Connected to event stream\n');
 
     var reader = res.body.getReader();
@@ -96,7 +103,8 @@ function scheduleReconnect(onEvent) {
   reconnectTimer = setTimeout(function () {
     reconnectTimer = null;
     connect(onEvent);
-  }, RECONNECT_DELAY);
+  }, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_DELAY_MAX);
 }
 
 function handleEvent(event, agentId, onEvent) {

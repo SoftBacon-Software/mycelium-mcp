@@ -41,7 +41,12 @@ function safeParseJSON(str, fallback) {
 
 function timeAgo(iso) {
   if (!iso) return 'never';
-  var ms = Date.now() - new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).getTime();
+  // SQLite timestamps arrive with no timezone — treat as UTC. But don't
+  // append Z when an offset (or Z) is already present: that makes an
+  // invalid date and every timestamp would render as "NaNd ago".
+  var hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
+  var ms = Date.now() - new Date(hasTz ? iso : iso + 'Z').getTime();
+  if (isNaN(ms)) return iso;
   if (ms < 60000) return Math.round(ms / 1000) + 's ago';
   if (ms < 3600000) return Math.round(ms / 60000) + 'm ago';
   if (ms < 86400000) return Math.round(ms / 3600000) + 'h ago';
@@ -387,15 +392,15 @@ export function registerTools(server) {
       addProgressNote('Completed task #' + args.task_id);
       setClaimedItem(null);
 
-      // Find next task (use /work/ to avoid emitting a spurious agent_boot event)
+      // Find next work item (use /work/ to avoid emitting a spurious agent_boot event).
+      // The endpoint returns { queue: [...] } — a prioritized list, NOT a tasks field.
       var nextWork = '';
       if (st.agentId) {
         try {
           var workData = await apiGet('/work/' + st.agentId);
-          if (workData.tasks.length) {
-            nextWork = workData.tasks[0].title;
-          }
-        } catch { /* ignore */ }
+          var queue = workData.queue || workData.work_queue || [];
+          if (queue.length) nextWork = queue[0].title;
+        } catch { /* ignore — working_on just clears */ }
       }
 
       setWorkingOn(nextWork);
@@ -739,14 +744,16 @@ export function registerTools(server) {
       addProgressNote('Fixed bug #' + args.bug_id);
       setClaimedItem(null);
 
-      // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event)
+      // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event).
+      // The endpoint returns { queue: [...] } — a prioritized list, NOT a tasks field.
       var st = getState();
       var nextWork = '';
       if (st.agentId) {
         try {
           var workData = await apiGet('/work/' + st.agentId);
-          if (workData.tasks.length) nextWork = workData.tasks[0].title;
-        } catch { /* ignore */ }
+          var queue = workData.queue || workData.work_queue || [];
+          if (queue.length) nextWork = queue[0].title;
+        } catch { /* ignore — working_on just clears */ }
       }
       setWorkingOn(nextWork);
       if (st.agentId) await sendHeartbeat();
@@ -2087,11 +2094,17 @@ function pluginSchemaToZod(schema) {
   return flat;
 }
 
-// Build the API path, substituting {param} and :param placeholders from args
+// Build the API path, substituting {param} and :param placeholders from args.
+// A missing path param is a hard error — substituting '' would silently call
+// the wrong endpoint (e.g. /assets//upload) and surface as a confusing 404.
 function buildPath(pathTemplate, args) {
   return pathTemplate.replace(/\{(\w+)\}|:(\w+)/g, function (_, a, b) {
     var key = a || b;
-    return encodeURIComponent(args[key] || '');
+    var val = args[key];
+    if (val === undefined || val === null || val === '') {
+      throw new Error('Missing required path parameter: ' + key);
+    }
+    return encodeURIComponent(val);
   });
 }
 

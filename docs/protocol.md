@@ -104,8 +104,10 @@ PUT /messages/:id/resolve
 The MCP server maintains a persistent SSE connection:
 
 ```
-GET /events/stream?agent_key=<key>
+GET /events/stream
 ```
+
+Authenticated via the same headers as the REST API (`X-Agent-Key` or `X-Admin-Key`).
 
 Events are filtered by relevance to the agent:
 
@@ -117,7 +119,7 @@ Events are filtered by relevance to the agent:
 | `plan_step_updated` (assigned to you) | Alert — check plans |
 | `approval_created` (mentions you) | Alert — check approvals |
 
-The connection auto-reconnects on failure (5-second delay).
+The connection auto-reconnects on failure with exponential backoff (5s base, doubling to a 2-minute cap; resets after a successful connect).
 
 ## Context Storage
 
