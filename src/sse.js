@@ -8,18 +8,18 @@ import { getState } from './state.js';
 // Reconnect with exponential backoff (5s → 10s → ... → 2min cap) so a down
 // or auth-rejecting substrate isn't hammered every 5s for the whole session.
 // Reset to the base delay after any successful connection.
-var RECONNECT_DELAY_BASE = 5000;
-var RECONNECT_DELAY_MAX = 120000;
-var reconnectDelay = RECONNECT_DELAY_BASE;
-var controller = null;
-var reconnectTimer = null;
-var connected = false;
+const RECONNECT_DELAY_BASE = 5000;
+const RECONNECT_DELAY_MAX = 120000;
+let reconnectDelay = RECONNECT_DELAY_BASE;
+let controller = null;
+let reconnectTimer = null;
+let connected = false;
 
 export function isSSEConnected() {
   return connected;
 }
 
-var mcpServerRef = null;
+let mcpServerRef = null;
 
 export function startSSE(onEvent, mcpServer) {
   if (mcpServer) mcpServerRef = mcpServer;
@@ -41,21 +41,21 @@ export function stopSSE() {
 }
 
 async function connect(onEvent) {
-  var st = getState();
+  const st = getState();
   // Build URL — auth via X-Agent-Key / X-Admin-Key headers (set below)
-  var url = `${API_URL}/events/stream`;
+  const url = `${API_URL}/events/stream`;
 
   controller = new AbortController();
 
   try {
-    var headers = {};
+    const headers = {};
     if (ROLE === 'admin') {
       headers['X-Admin-Key'] = API_KEY;
     } else {
       headers['X-Agent-Key'] = API_KEY;
     }
 
-    var res = await fetch(url, {
+    const res = await fetch(url, {
       headers: headers,
       signal: controller.signal,
     });
@@ -70,24 +70,24 @@ async function connect(onEvent) {
     reconnectDelay = RECONNECT_DELAY_BASE;
     process.stderr.write('[mycelium-sse] Connected to event stream\n');
 
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
-    var buffer = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
     while (true) {
-      var { done, value } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
 
       // Parse SSE format: "data: {...}\n\n"
-      var lines = buffer.split('\n');
+      const lines = buffer.split('\n');
       buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
-      for (var line of lines) {
+      for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
-            var event = JSON.parse(line.slice(6));
+            const event = JSON.parse(line.slice(6));
             if (event.type === 'connected') continue; // Skip connection confirmation
             handleEvent(event, st.agentId, onEvent);
           } catch {
@@ -117,11 +117,11 @@ function scheduleReconnect(onEvent) {
 
 function handleEvent(event, agentId, onEvent) {
   // Filter: only surface events relevant to this agent
-  var type = event.type || '';
-  var summary = event.summary || '';
+  const type = event.type || '';
+  const summary = event.summary || '';
 
   // event.data arrives as a JSON string from the server — parse it
-  var data = {};
+  let data = {};
   if (event.data) {
     try {
       data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
@@ -135,13 +135,13 @@ function handleEvent(event, agentId, onEvent) {
   // "sender sent message to <agentId>" or "sender sent directive to <agentId>"
   // We check if the summary mentions this agent as recipient.
   if (type === 'message_sent' || type === 'message_received') {
-    var summaryLower = summary.toLowerCase();
-    var agentLower = (agentId || '').toLowerCase();
-    var isForMe =
+    const summaryLower = summary.toLowerCase();
+    const agentLower = (agentId || '').toLowerCase();
+    const isForMe =
       agentLower &&
       (summaryLower.indexOf(` to ${agentLower}`) !== -1 ||
         summaryLower.indexOf(`→ ${agentLower}`) !== -1);
-    var isDirective =
+    const isDirective =
       summaryLower.indexOf('directive') !== -1 || summaryLower.indexOf('request') !== -1;
     if (isForMe) {
       if (isDirective) {
@@ -158,8 +158,8 @@ function handleEvent(event, agentId, onEvent) {
 
   // Directive or request events (message_id in data, check summary for our agent)
   if (type === 'request_created' || type === 'approval_created') {
-    var sum = summary.toLowerCase();
-    var aid = (agentId || '').toLowerCase();
+    const sum = summary.toLowerCase();
+    const aid = (agentId || '').toLowerCase();
     if (aid && sum.indexOf(aid) !== -1) {
       process.stderr.write(
         `[mycelium-sse] ${type.replace('_', ' ')}: ${summary} (check mycelium_boot)\n`,
@@ -185,8 +185,8 @@ function handleEvent(event, agentId, onEvent) {
 
   // Sleep mode activated — inject work directive into this Claude Code session
   if (type === 'sleep_mode_on' && mcpServerRef && mcpServerRef.server) {
-    var directive = data?.directive || '';
-    var prompt =
+    const directive = data?.directive || '';
+    const prompt =
       'Sleep mode is now active. The operator has gone to sleep.\n\n' +
       (directive ? `Night directive: ${directive}\n\n` : '') +
       'Run your autonomous work loop:\n' +

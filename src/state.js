@@ -3,7 +3,7 @@
 import { apiPost, apiPut } from './api.js';
 import { startSSE, stopSSE } from './sse.js';
 
-var state = {
+const state = {
   agentId: process.env.MYCELIUM_AGENT_ID || null,
   role: process.env.MYCELIUM_ROLE || 'admin',
   workingOn: '',
@@ -28,33 +28,33 @@ export function getState() {
 // Consume pending inbox — returns formatted string or null. Call from any tool response.
 export function consumePendingInbox() {
   if (!state.pendingInbox) return null;
-  var inbox = state.pendingInbox;
+  const inbox = state.pendingInbox;
   state.pendingInbox = null;
-  var lines = [];
+  const lines = [];
   if (inbox.directives && inbox.directives.length > 0) {
     lines.push(`=== DIRECTIVES (${inbox.directives.length}) — MUST RESPOND ===`);
-    for (var d of inbox.directives) {
+    for (const d of inbox.directives) {
       lines.push(`[DIR #${d.id}] from ${d.from_agent}: ${(d.content || '').substring(0, 500)}`);
     }
   }
   if (inbox.requests && inbox.requests.length > 0) {
     lines.push(`=== REQUESTS (${inbox.requests.length}) — MUST RESPOND ===`);
-    for (var r of inbox.requests) {
+    for (const r of inbox.requests) {
       lines.push(`[REQ #${r.id}] from ${r.from_agent}: ${(r.content || '').substring(0, 500)}`);
     }
   }
   if (inbox.messages && inbox.messages.length > 0) {
     lines.push(`=== NEW MESSAGES (${inbox.messages.length}) ===`);
-    for (var m of inbox.messages) {
-      var sender = m.from_agent || '?';
-      var target = m.to_agent ? '' : ' (broadcast)';
+    for (const m of inbox.messages) {
+      const sender = m.from_agent || '?';
+      const target = m.to_agent ? '' : ' (broadcast)';
       lines.push(`[MSG #${m.id}] ${sender}${target}: ${(m.content || '').substring(0, 500)}`);
     }
   }
   if (inbox.approvals && inbox.approvals.length > 0) {
     lines.push(`=== YOUR APPROVALS (${inbox.approvals.length}) ===`);
-    for (var a of inbox.approvals) {
-      var label = (a.status || 'pending').toUpperCase();
+    for (const a of inbox.approvals) {
+      const label = (a.status || 'pending').toUpperCase();
       lines.push(`[${label} #${a.id}] ${a.action_type || '?'}: ${a.title || ''}`);
     }
   }
@@ -74,12 +74,12 @@ export function setBooted(bootData) {
   }
   // Track message IDs from boot data
   if (bootData.new_messages) {
-    for (var m of bootData.new_messages) {
+    for (const m of bootData.new_messages) {
       if (state.messagesAcked.indexOf(m.id) === -1) state.messagesAcked.push(m.id);
     }
   }
   if (bootData.pending_requests) {
-    for (var r of bootData.pending_requests) {
+    for (const r of bootData.pending_requests) {
       if (state.messagesAcked.indexOf(r.id) === -1) state.messagesAcked.push(r.id);
     }
   }
@@ -110,7 +110,7 @@ export function addProgressNote(note) {
 }
 
 export function getAutoSnapshot() {
-  var snapshot = Object.assign({}, state.customState);
+  const snapshot = Object.assign({}, state.customState);
   if (state.claimedItem) snapshot.claimed_item = state.claimedItem;
   if (state.currentStep) snapshot.current_step = state.currentStep;
   if (state.progressNotes.length) snapshot.progress = state.progressNotes;
@@ -120,7 +120,7 @@ export function getAutoSnapshot() {
 export async function sendHeartbeat() {
   if (!state.agentId) return;
   try {
-    var body = {
+    const body = {
       status: 'online',
       working_on: state.workingOn,
       session_id: state.sessionId,
@@ -129,11 +129,11 @@ export async function sendHeartbeat() {
     };
     // Admin mode: include agent_id so server attributes heartbeat correctly
     if (state.role !== 'agent') body.agent_id = state.agentId;
-    var result = await apiPost('/agents/heartbeat', body);
+    const result = await apiPost('/agents/heartbeat', body);
     // Surface inbox from heartbeat response — store for next tool call
     if (result?.inbox) {
-      var inbox = result.inbox;
-      var hasContent =
+      const inbox = result.inbox;
+      const hasContent =
         (inbox.directives && inbox.directives.length > 0) ||
         (inbox.requests && inbox.requests.length > 0) ||
         (inbox.messages && inbox.messages.length > 0);
@@ -183,11 +183,11 @@ export async function shutdown() {
   if (state.agentId) {
     // Short timeout: shutdown runs on SIGINT/SIGTERM/transport-close — a hung
     // substrate must not keep this process alive past a few seconds.
-    var quick = { timeoutMs: 5000 };
+    const quick = { timeoutMs: 5000 };
 
     // Auto-save session summary
     try {
-      var sessionData = {
+      const sessionData = {
         working_on: state.workingOn || '',
         timestamp: new Date().toISOString(),
       };
@@ -204,7 +204,7 @@ export async function shutdown() {
 
     // Clear working_on on shutdown
     try {
-      var offlineBody = { status: 'offline', working_on: '' };
+      const offlineBody = { status: 'offline', working_on: '' };
       if (state.role !== 'agent') offlineBody.agent_id = state.agentId;
       await apiPost('/agents/heartbeat', offlineBody, quick);
     } catch {

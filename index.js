@@ -13,11 +13,11 @@ import { registerPluginTools, registerTools } from './src/tools.js';
 
 // Single source of truth for the version — a hardcoded copy here drifted from
 // package.json before; reading it keeps `npm version` bumps automatic.
-var pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
-var role = process.env.MYCELIUM_ROLE || 'admin';
-var agentId = process.env.MYCELIUM_AGENT_ID || null;
-var apiKey = process.env.MYCELIUM_API_KEY;
+const role = process.env.MYCELIUM_ROLE || 'admin';
+const agentId = process.env.MYCELIUM_AGENT_ID || null;
+const apiKey = process.env.MYCELIUM_API_KEY;
 
 if (!apiKey) {
   process.stderr.write('ERROR: MYCELIUM_API_KEY environment variable is required\n');
@@ -29,7 +29,7 @@ if (role === 'agent' && !agentId) {
   process.exit(1);
 }
 
-var server = new McpServer({
+const server = new McpServer({
   name: 'mycelium-mcp',
   version: pkg.version,
 });
@@ -37,7 +37,7 @@ var server = new McpServer({
 registerTools(server);
 
 // Clean shutdown — guarded so signal + transport-close can't run it twice
-var shuttingDown = false;
+let shuttingDown = false;
 async function shutdownOnce() {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -53,7 +53,7 @@ process.on('SIGTERM', async () => {
 });
 
 // Connect FIRST so Claude Code can handshake immediately
-var transport = new StdioServerTransport();
+const transport = new StdioServerTransport();
 await server.connect(transport);
 
 // When the client disconnects WITHOUT a signal (e.g. Claude Code exits and

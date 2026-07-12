@@ -25,12 +25,12 @@ function text(s) {
 // Register a tool under mycelium_* name only (studio_* aliases removed to stay under tool limits)
 // Wraps handler with error handling so failures return MCP error content instead of crashing
 function registerDual(server, studioName, description, schema, handler) {
-  var myceliumName = studioName.replace(/^studio_/, 'mycelium_');
-  var safeHandler = async (args) => {
+  const myceliumName = studioName.replace(/^studio_/, 'mycelium_');
+  const safeHandler = async (args) => {
     try {
-      var result = await handler(args);
+      const result = await handler(args);
       // Prepend any pending inbox messages from auto-heartbeat
-      var inbox = consumePendingInbox();
+      const inbox = consumePendingInbox();
       if (inbox && result?.content && result.content.length > 0) {
         result.content[0].text =
           '--- INCOMING MESSAGES ---\n' +
@@ -40,7 +40,7 @@ function registerDual(server, studioName, description, schema, handler) {
       }
       return result;
     } catch (err) {
-      var msg = err?.message ? err.message : String(err);
+      const msg = err?.message ? err.message : String(err);
       return {
         content: [{ type: 'text', text: `Error in ${myceliumName}: ${msg}` }],
         isError: true,
@@ -65,8 +65,8 @@ function timeAgo(iso) {
   // SQLite timestamps arrive with no timezone — treat as UTC. But don't
   // append Z when an offset (or Z) is already present: that makes an
   // invalid date and every timestamp would render as "NaNd ago".
-  var hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
-  var ms = Date.now() - new Date(hasTz ? iso : `${iso}Z`).getTime();
+  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
+  const ms = Date.now() - new Date(hasTz ? iso : `${iso}Z`).getTime();
   if (Number.isNaN(ms)) return iso;
   if (ms < 60000) return `${Math.round(ms / 1000)}s ago`;
   if (ms < 3600000) return `${Math.round(ms / 60000)}m ago`;
@@ -75,7 +75,7 @@ function timeAgo(iso) {
 }
 
 function formatAgent(a) {
-  var line = `${(a.status === 'online' ? '[ON] ' : '[OFF] ') + a.name} (${a.id})`;
+  let line = `${(a.status === 'online' ? '[ON] ' : '[OFF] ') + a.name} (${a.id})`;
   if (a.project_id) line += ` — ${a.project_id}`;
   if (a.working_on) line += `\n  Working on: ${a.working_on}`;
   line += `\n  Heartbeat: ${timeAgo(a.last_heartbeat)}`;
@@ -111,15 +111,15 @@ function formatBug(b) {
 }
 
 function formatMessage(m) {
-  var tag = m.msg_type === 'request' ? '[REQ] ' : m.msg_type === 'directive' ? '[DIR] ' : '';
-  var body = (m.content || '').slice(0, 200);
+  const tag = m.msg_type === 'request' ? '[REQ] ' : m.msg_type === 'directive' ? '[DIR] ' : '';
+  let body = (m.content || '').slice(0, 200);
   if ((m.content || '').length > 200) body += '...';
   return `${tag + m.from_agent}→${m.to_agent || 'all'}: ${body}`;
 }
 
 function formatPlan(p) {
-  var steps = p.steps || [];
-  var done = steps.filter((s) => s.status === 'completed').length;
+  const steps = p.steps || [];
+  const done = steps.filter((s) => s.status === 'completed').length;
   return (
     '#' +
     p.id +
@@ -144,19 +144,19 @@ export function registerTools(server) {
     'Boot agent session or get admin overview. Agent mode: starts auto-heartbeat, returns tasks/messages/plans. Admin mode: returns full dashboard.',
     {},
     async () => {
-      var st = getState();
+      const st = getState();
       if (st.role === 'agent' && st.agentId) {
-        var data = await apiGet(`/boot/${st.agentId}?verbose=true`);
+        const data = await apiGet(`/boot/${st.agentId}?verbose=true`);
         setBooted(data);
         startHeartbeat();
-        var proj = data.agent.project || '';
-        var lines = [`Booted as ${st.agentId} (${proj})`];
+        const proj = data.agent.project || '';
+        const lines = [`Booted as ${st.agentId} (${proj})`];
 
         // Role contract
         if (data.role_contract) {
           lines.push('');
           lines.push('=== Role Contract ===');
-          var rc = data.role_contract;
+          const rc = data.role_contract;
           if (typeof rc === 'string') {
             lines.push(rc);
           } else {
@@ -167,10 +167,10 @@ export function registerTools(server) {
             );
             if (rc.description) lines.push(rc.description);
             if (rc.responsibilities?.length) {
-              for (var resp of rc.responsibilities) lines.push(`- ${resp}`);
+              for (const resp of rc.responsibilities) lines.push(`- ${resp}`);
             }
             if (rc.constraints?.length) {
-              for (var con of rc.constraints) lines.push(`! ${con}`);
+              for (const con of rc.constraints) lines.push(`! ${con}`);
             }
             if (rc.capabilities?.length) lines.push(`Can: ${rc.capabilities.join(', ')}`);
           }
@@ -178,8 +178,8 @@ export function registerTools(server) {
 
         // Counts summary
         if (data.counts) {
-          var c = data.counts;
-          var parts = [];
+          const c = data.counts;
+          const parts = [];
           if (c.directives) parts.push(`${c.directives} directive${c.directives > 1 ? 's' : ''}`);
           if (c.requests) parts.push(`${c.requests} request${c.requests > 1 ? 's' : ''}`);
           if (c.messages_unread) parts.push(`${c.messages_unread} unread`);
@@ -194,7 +194,7 @@ export function registerTools(server) {
         if (data.work_queue && data.work_queue.length > 0) {
           lines.push('');
           lines.push(`=== Work Queue (${data.work_queue.length} items) ===`);
-          for (var item of data.work_queue) {
+          for (const item of data.work_queue) {
             lines.push(`${(item.type || '').toUpperCase()} #${item.id}: ${item.title}`);
           }
         }
@@ -204,7 +204,7 @@ export function registerTools(server) {
           lines.push('');
           lines.push(`*** BLOCKING DIRECTIVES (${data.pending_directives.length}) ***`);
           lines.push('You MUST respond to these before receiving work assignments.');
-          for (var dir of data.pending_directives) {
+          for (const dir of data.pending_directives) {
             lines.push(`  #${dir.id} from ${dir.from}: ${(dir.content || '').substring(0, 200)}`);
           }
         }
@@ -213,7 +213,7 @@ export function registerTools(server) {
         if (data.pending_requests && data.pending_requests.length > 0) {
           lines.push('');
           lines.push(`=== Pending Requests (${data.pending_requests.length}) ===`);
-          for (var r of data.pending_requests) {
+          for (const r of data.pending_requests) {
             lines.push(`[REQ] ${r.from}: ${(r.content || '').substring(0, 200)}`);
           }
         }
@@ -222,7 +222,7 @@ export function registerTools(server) {
         if (data.other_agents && data.other_agents.length > 0) {
           lines.push('');
           lines.push('=== Agents ===');
-          for (var a of data.other_agents) {
+          for (const a of data.other_agents) {
             lines.push(
               '[' +
                 (a.status === 'online' ? 'ON' : 'OFF') +
@@ -235,7 +235,7 @@ export function registerTools(server) {
 
         // Crash recovery
         if (data.crash_recovery?.detected) {
-          var cr = data.crash_recovery;
+          const cr = data.crash_recovery;
           lines.push('');
           lines.push('*** CRASH RECOVERY ***');
           lines.push(`Previous session crashed ${cr.stale_minutes} minutes ago.`);
@@ -246,12 +246,12 @@ export function registerTools(server) {
 
         // Calibration / drift detection
         if (data.calibration) {
-          var cal = data.calibration;
+          const cal = data.calibration;
           if (cal.status === 'critical' || cal.status === 'drifted') {
             lines.push('');
             lines.push(`*** DRIFT DETECTED: ${cal.status.toUpperCase()} ***`);
             if (cal.drift && cal.drift.length > 0) {
-              for (var d of cal.drift) {
+              for (const d of cal.drift) {
                 lines.push(`  [${(d.level || 'warn').toUpperCase()}] ${d.detail || d}`);
               }
             }
@@ -264,7 +264,7 @@ export function registerTools(server) {
 
         // Savepoint
         if (data.savepoint?.has_savepoint) {
-          var sp = data.savepoint;
+          const sp = data.savepoint;
           lines.push('');
           lines.push('=== Session Resume ===');
           lines.push(`Last session: ${sp.was_working_on || 'idle'}`);
@@ -279,9 +279,9 @@ export function registerTools(server) {
         if (data.my_approvals && data.my_approvals.length > 0) {
           lines.push('');
           lines.push(`=== YOUR APPROVALS (${data.my_approvals.length}) ===`);
-          for (var appr of data.my_approvals) {
-            var apStatus = (appr.status || 'pending').toUpperCase();
-            var apAction =
+          for (const appr of data.my_approvals) {
+            const apStatus = (appr.status || 'pending').toUpperCase();
+            const apAction =
               appr.status === 'approved' ? ' — execute now' : ' — waiting for human approval';
             lines.push(
               '[' +
@@ -300,17 +300,17 @@ export function registerTools(server) {
         // Fetch governance rulesets linked to agent's project
         if (proj) {
           try {
-            var concepts = await apiGet(`/projects/${proj}/concepts`);
-            var rulesets = (concepts || []).filter((c) => c.type === 'ruleset');
+            const concepts = await apiGet(`/projects/${proj}/concepts`);
+            const rulesets = (concepts || []).filter((c) => c.type === 'ruleset');
             if (rulesets.length > 0) {
               lines.push('');
               lines.push('=== GOVERNANCE RULES (from network — these override MEMORY.md) ===');
-              for (var rs of rulesets) {
+              for (const rs of rulesets) {
                 lines.push(`[Ruleset #${rs.id}] ${rs.name}`);
                 try {
-                  var rdata = typeof rs.data === 'string' ? JSON.parse(rs.data) : rs.data;
+                  const rdata = typeof rs.data === 'string' ? JSON.parse(rs.data) : rs.data;
                   if (rdata?.rules) {
-                    for (var rule of rdata.rules) {
+                    for (const rule of rdata.rules) {
                       lines.push(
                         '  [' +
                           (rule.severity || 'hard').toUpperCase() +
@@ -336,21 +336,21 @@ export function registerTools(server) {
       }
 
       // Admin mode — request verbose format (slim boot removed full data)
-      var overview = await apiGet('/admin/overview?verbose=true');
-      var identity = st.agentId ? `You are: ${st.agentId} (admin mode)\n\n` : '';
+      const overview = await apiGet('/admin/overview?verbose=true');
+      const identity = st.agentId ? `You are: ${st.agentId} (admin mode)\n\n` : '';
 
       // Fetch governance rulesets for admin boot too
-      var govLines = '';
+      let govLines = '';
       try {
-        var allConcepts = await apiGet('/concepts?type=ruleset');
+        const allConcepts = await apiGet('/concepts?type=ruleset');
         if (allConcepts && allConcepts.length > 0) {
-          var govParts = ['\n=== GOVERNANCE RULES (from network — these override MEMORY.md) ==='];
-          for (var rs of allConcepts) {
+          const govParts = ['\n=== GOVERNANCE RULES (from network — these override MEMORY.md) ==='];
+          for (const rs of allConcepts) {
             govParts.push(`[Ruleset #${rs.id}] ${rs.name}`);
             try {
-              var rdata = typeof rs.data === 'string' ? JSON.parse(rs.data) : rs.data;
+              const rdata = typeof rs.data === 'string' ? JSON.parse(rs.data) : rs.data;
               if (rdata?.rules) {
-                for (var rule of rdata.rules) {
+                for (const rule of rdata.rules) {
                   govParts.push(
                     '  [' +
                       (rule.severity || 'hard').toUpperCase() +
@@ -381,7 +381,7 @@ export function registerTools(server) {
     'Get full Mycelium dashboard snapshot: agents, tasks, messages, plans, bugs.',
     {},
     async () => {
-      var data = await apiGet('/admin/overview?verbose=true');
+      const data = await apiGet('/admin/overview?verbose=true');
       return text(formatOverview(data));
     },
   );
@@ -400,18 +400,18 @@ export function registerTools(server) {
       },
     },
     async (params) => {
-      var st = getState();
-      var lines = [];
-      var autoClaim = params?.auto_claim;
+      const st = getState();
+      const lines = [];
+      const autoClaim = params?.auto_claim;
 
       if (st.agentId) {
-        var endpoint = `/work/${st.agentId}${autoClaim ? '?auto_claim=true' : ''}`;
-        var data = await apiGet(endpoint);
-        var queue = data.queue || data.work_queue || [];
+        const endpoint = `/work/${st.agentId}${autoClaim ? '?auto_claim=true' : ''}`;
+        const data = await apiGet(endpoint);
+        const queue = data.queue || data.work_queue || [];
 
         if (data.claimed) {
           lines.push('=== AUTO-CLAIMED ===');
-          var c = data.claimed;
+          const c = data.claimed;
           lines.push(`Type: ${c.type} | ID: #${c.id}`);
           lines.push(`Title: ${c.title}`);
           if (c.description) lines.push(`Description: ${c.description}`);
@@ -422,7 +422,7 @@ export function registerTools(server) {
         }
 
         if (queue.length) {
-          var typeLabels = {
+          const typeLabels = {
             directive: 'DIRECTIVE',
             request: 'REQUEST',
             plan_step: 'PLAN STEP',
@@ -432,10 +432,10 @@ export function registerTools(server) {
             bug_unassigned: 'BUG (unclaimed)',
           };
           lines.push(`=== Prioritized Work Queue (${queue.length} items) ===`);
-          for (var i = 0; i < queue.length; i++) {
-            var item = queue[i];
-            var label = typeLabels[item.type] || item.type;
-            var line = `${i + 1}. [${label}] #${item.id}`;
+          for (let i = 0; i < queue.length; i++) {
+            const item = queue[i];
+            const label = typeLabels[item.type] || item.type;
+            let line = `${i + 1}. [${label}] #${item.id}`;
             if (item.plan_title) line += ` (${item.plan_title})`;
             line += `: ${item.title}`;
             if (item.status) line += ` [${item.status}]`;
@@ -449,17 +449,17 @@ export function registerTools(server) {
       }
 
       // Admin: show all open work
-      var overview = await apiGet('/admin/overview');
-      var tasks = overview.tasks || {};
-      var allTasks = [].concat(tasks.open || [], tasks.in_progress || [], tasks.review || []);
+      const overview = await apiGet('/admin/overview');
+      const tasks = overview.tasks || {};
+      const allTasks = [].concat(tasks.open || [], tasks.in_progress || [], tasks.review || []);
       if (allTasks.length) {
         lines.push(`=== All Open Tasks (${allTasks.length}) ===`);
-        for (var t2 of allTasks) lines.push(formatTask(t2));
+        for (const t2 of allTasks) lines.push(formatTask(t2));
         lines.push('');
       }
       if (overview.approval_queue?.length) {
         lines.push(`=== Approval Queue (${overview.approval_queue.length}) ===`);
-        for (var aq of overview.approval_queue) lines.push(formatTask(aq));
+        for (const aq of overview.approval_queue) lines.push(formatTask(aq));
         lines.push('');
       }
       if (!lines.length) lines.push('No open work items.');
@@ -473,11 +473,11 @@ export function registerTools(server) {
     'Claim a task: assigns it to you, sets status to in_progress, and updates your working_on status automatically.',
     { task_id: z.number().describe('Task ID to claim') },
     async (args) => {
-      var st = getState();
-      var assignee = st.agentId || '__admin__';
+      const st = getState();
+      const assignee = st.agentId || '__admin__';
 
       // Get task details first
-      var task = await apiGet(`/tasks/${args.task_id}`);
+      const task = await apiGet(`/tasks/${args.task_id}`);
       await apiPut(`/tasks/${args.task_id}`, { assignee: assignee, status: 'in_progress' });
 
       // Auto-update working_on and track claimed item
@@ -506,8 +506,8 @@ export function registerTools(server) {
       notes: z.string().optional().describe('Optional completion notes'),
     },
     async (args) => {
-      var st = getState();
-      var update = { status: 'done' };
+      const st = getState();
+      const update = { status: 'done' };
       if (args.notes) update.description = args.notes;
       await apiPut(`/tasks/${args.task_id}`, update);
       addProgressNote(`Completed task #${args.task_id}`);
@@ -515,11 +515,11 @@ export function registerTools(server) {
 
       // Find next work item (use /work/ to avoid emitting a spurious agent_boot event).
       // The endpoint returns { queue: [...] } — a prioritized list, NOT a tasks field.
-      var nextWork = '';
+      let nextWork = '';
       if (st.agentId) {
         try {
-          var workData = await apiGet(`/work/${st.agentId}`);
-          var queue = workData.queue || workData.work_queue || [];
+          const workData = await apiGet(`/work/${st.agentId}`);
+          const queue = workData.queue || workData.work_queue || [];
           if (queue.length) nextWork = queue[0].title;
         } catch {
           /* ignore — working_on just clears */
@@ -529,7 +529,7 @@ export function registerTools(server) {
       setWorkingOn(nextWork);
       if (st.agentId) await sendHeartbeat();
 
-      var msg = `Completed task #${args.task_id}.`;
+      let msg = `Completed task #${args.task_id}.`;
       if (nextWork) msg += `\nworking_on advanced to: "${nextWork}"`;
       else msg += '\nworking_on cleared (no more tasks).';
       return text(msg);
@@ -552,8 +552,8 @@ export function registerTools(server) {
         .describe('Whether task needs admin approval before work starts'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         title: args.title,
         description: args.description,
         project_id: args.project_id,
@@ -562,7 +562,7 @@ export function registerTools(server) {
       };
       if (args.assignee) body.assignee = args.assignee;
       if (args.needs_approval) body.needs_approval = 1;
-      var result = await apiPost('/tasks', body);
+      const result = await apiPost('/tasks', body);
       return text(`Created task #${result.id}: ${args.title}`);
     },
   );
@@ -579,14 +579,14 @@ export function registerTools(server) {
       project_id: z.string().optional().describe('Project context'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         content: args.content,
         from_agent: st.agentId || '__admin__',
       };
       if (args.to) body.to_agent = args.to;
       if (args.project_id) body.project_id = args.project_id;
-      var result = await apiPost('/messages', body);
+      const result = await apiPost('/messages', body);
       return text(`Message sent (id: ${result.id}) to ${args.to || 'all'}`);
     },
   );
@@ -602,15 +602,15 @@ export function registerTools(server) {
       project_id: z.string().optional().describe('Project context'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         content: args.content,
         to_agent: args.to,
         from_agent: st.agentId || '__admin__',
       };
       if (args.auto_task) body.auto_task = true;
       if (args.project_id) body.project_id = args.project_id;
-      var result = await apiPost('/requests', body);
+      const result = await apiPost('/requests', body);
       return text(
         'Request sent (id: ' +
           result.id +
@@ -645,17 +645,17 @@ export function registerTools(server) {
       limit: z.number().optional().describe('Max messages to return (default 30)'),
     },
     async (args) => {
-      var st = getState();
-      var params = [];
+      const st = getState();
+      const params = [];
       if (args.since) params.push(`since=${encodeURIComponent(args.since)}`);
       if (args.from) params.push(`from=${encodeURIComponent(args.from)}`);
       if (args.limit) params.push(`limit=${args.limit}`);
       // Auto-filter to this agent's inbox (messages TO me + broadcasts)
       if (st.agentId && !args.from) params.push(`to=${encodeURIComponent(st.agentId)}`);
-      var qs = params.length ? `?${params.join('&')}` : '';
-      var messages = await apiGet(`/messages${qs}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const messages = await apiGet(`/messages${qs}`);
       // Also fetch pending requests targeted at this agent
-      var pending = [];
+      let pending = [];
       if (st.agentId) {
         try {
           pending = await apiGet(
@@ -668,17 +668,17 @@ export function registerTools(server) {
         }
       }
       // Merge: pending requests first (deduped), then recent messages
-      var seenIds = new Set();
-      var all = [];
-      for (var p of pending) {
+      const seenIds = new Set();
+      const all = [];
+      for (const p of pending) {
         seenIds.add(p.id);
         all.push(p);
       }
-      for (var m of messages) {
+      for (const m of messages) {
         if (!seenIds.has(m.id)) all.push(m);
       }
       if (!all.length) return text('No messages found.');
-      var lines = all.map(formatMessage);
+      const lines = all.map(formatMessage);
       return text(lines.join('\n'));
     },
   );
@@ -694,16 +694,16 @@ export function registerTools(server) {
       status: z.string().optional().describe('Filter by status (default: active)'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.project_id) params.push(`project_id=${encodeURIComponent(args.project_id)}`);
       params.push(`status=${args.status || 'active'}`);
-      var plans = await apiGet(`/plans?${params.join('&')}`);
+      const plans = await apiGet(`/plans?${params.join('&')}`);
       if (!plans.length) return text('No plans found.');
 
-      var lines = [];
-      for (var p of plans) {
+      const lines = [];
+      for (const p of plans) {
         // Fetch full plan with steps
-        var full = await apiGet(`/plans/${p.id}`);
+        const full = await apiGet(`/plans/${p.id}`);
         lines.push(formatPlan(full));
         lines.push('');
       }
@@ -727,7 +727,7 @@ export function registerTools(server) {
       linked_branch: z.string().optional().describe('Git branch name'),
     },
     async (args) => {
-      var body = {};
+      const body = {};
       if (args.status) body.status = args.status;
       if (args.assignee) body.assignee = args.assignee;
       if (args.linked_task_id) body.linked_task_id = args.linked_task_id;
@@ -766,8 +766,8 @@ export function registerTools(server) {
         .describe('Ordered list of plan steps to create'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         title: args.title,
         description: args.description,
         project_id: args.project_id,
@@ -775,8 +775,8 @@ export function registerTools(server) {
         owner: st.agentId || '__admin__',
       };
       if (args.steps) body.steps = args.steps;
-      var result = await apiPost('/plans', body);
-      var msg = `Created plan #${result.id}: ${args.title}`;
+      const result = await apiPost('/plans', body);
+      let msg = `Created plan #${result.id}: ${args.title}`;
       if (args.steps?.length) msg += ` (${args.steps.length} steps)`;
       return text(msg);
     },
@@ -799,8 +799,8 @@ export function registerTools(server) {
       category: z.string().optional().describe('Bug category (e.g. ui, api, data, other)'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         title: args.title,
         description: args.description,
         project_id: args.project_id,
@@ -808,7 +808,7 @@ export function registerTools(server) {
         category: args.category || 'other',
         reporter: st.agentId || '__admin__',
       };
-      var result = await apiPost('/bugs', body);
+      const result = await apiPost('/bugs', body);
       return text(`Filed bug #${result.id} [${args.severity || 'normal'}]: ${args.title}`);
     },
   );
@@ -825,7 +825,7 @@ export function registerTools(server) {
     },
     async (args) => {
       if (args.key) {
-        var val = await apiGet(
+        const val = await apiGet(
           '/context/keys/' +
             encodeURIComponent(args.namespace) +
             '/' +
@@ -833,7 +833,7 @@ export function registerTools(server) {
         );
         return text(val);
       }
-      var keys = await apiGet(`/context/keys/${encodeURIComponent(args.namespace)}`);
+      const keys = await apiGet(`/context/keys/${encodeURIComponent(args.namespace)}`);
       return text(keys);
     },
   );
@@ -854,7 +854,7 @@ export function registerTools(server) {
       expires_at: z.string().optional().describe('ISO timestamp when key expires'),
     },
     async (args) => {
-      var body = { data: args.data };
+      const body = { data: args.data };
       if (args.category) body.category = args.category;
       if (args.ttl) body.ttl = args.ttl;
       if (args.expires_at) body.expires_at = args.expires_at;
@@ -862,7 +862,7 @@ export function registerTools(server) {
         `/context/keys/${encodeURIComponent(args.namespace)}/${encodeURIComponent(args.key)}`,
         body,
       );
-      var suffix = args.ttl
+      const suffix = args.ttl
         ? ` (TTL: ${args.ttl}s)`
         : args.expires_at
           ? ` (expires: ${args.expires_at})`
@@ -882,11 +882,11 @@ export function registerTools(server) {
       status: z.string().optional().describe('Filter by status: open, in_progress, fixed, closed'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.project_id) params.push(`project_id=${encodeURIComponent(args.project_id)}`);
       if (args.status) params.push(`status=${encodeURIComponent(args.status)}`);
-      var qs = params.length ? `?${params.join('&')}` : '';
-      var bugs = await apiGet(`/bugs${qs}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const bugs = await apiGet(`/bugs${qs}`);
       if (!bugs.length) return text('No bugs found.');
       return text(bugs.map(formatBug).join('\n'));
     },
@@ -898,8 +898,8 @@ export function registerTools(server) {
     'Claim a bug and start working on it. Updates your working_on status.',
     { bug_id: z.number().describe('Bug ID to claim') },
     async (args) => {
-      var st = getState();
-      var bug = await apiGet(`/bugs/${args.bug_id}`);
+      const st = getState();
+      const bug = await apiGet(`/bugs/${args.bug_id}`);
       await apiPut(`/bugs/${args.bug_id}`, {
         status: 'in_progress',
         assignee: st.agentId || '__admin__',
@@ -920,7 +920,7 @@ export function registerTools(server) {
       notes: z.string().optional().describe('Fix notes'),
     },
     async (args) => {
-      var update = { status: 'fixed' };
+      const update = { status: 'fixed' };
       if (args.notes) update.admin_notes = args.notes;
       await apiPut(`/bugs/${args.bug_id}`, update);
       addProgressNote(`Fixed bug #${args.bug_id}`);
@@ -928,12 +928,12 @@ export function registerTools(server) {
 
       // Check for remaining work (use /work/ to avoid emitting a spurious agent_boot event).
       // The endpoint returns { queue: [...] } — a prioritized list, NOT a tasks field.
-      var st = getState();
-      var nextWork = '';
+      const st = getState();
+      let nextWork = '';
       if (st.agentId) {
         try {
-          var workData = await apiGet(`/work/${st.agentId}`);
-          var queue = workData.queue || workData.work_queue || [];
+          const workData = await apiGet(`/work/${st.agentId}`);
+          const queue = workData.queue || workData.work_queue || [];
           if (queue.length) nextWork = queue[0].title;
         } catch {
           /* ignore — working_on just clears */
@@ -968,17 +968,17 @@ export function registerTools(server) {
         .describe('JSON snapshot of custom session state to persist'),
     },
     async (args) => {
-      var st = getState();
+      const st = getState();
       setWorkingOn(args.working_on);
       if (st.agentId) {
         // Send heartbeat with savepoint data
-        var body = { status: 'online', working_on: args.working_on };
+        const body = { status: 'online', working_on: args.working_on };
         if (args.messages_acked) body.messages_acked = JSON.stringify(args.messages_acked);
         if (args.state_snapshot) body.state_snapshot = args.state_snapshot;
         // Admin mode: include agent_id so server attributes heartbeat correctly
         if (st.role !== 'agent') body.agent_id = st.agentId;
-        var result = await apiPost('/agents/heartbeat', body);
-        var lines = [`Heartbeat sent. working_on: "${args.working_on || ''}"`];
+        const result = await apiPost('/agents/heartbeat', body);
+        const lines = [`Heartbeat sent. working_on: "${args.working_on || ''}"`];
         if (result && result.pending > 0) lines[0] += ` | ${result.pending} pending`;
         if (result?.wake) lines[0] += ' | WAKE: urgent items waiting';
         if (result?.auto_dispatched && result.auto_dispatched.length > 0) {
@@ -986,11 +986,11 @@ export function registerTools(server) {
         }
         // Surface inbox messages directly in response
         if (result?.inbox) {
-          var inbox = result.inbox;
+          const inbox = result.inbox;
           if (inbox.directives && inbox.directives.length > 0) {
             lines.push('');
             lines.push(`=== DIRECTIVES (${inbox.directives.length}) — MUST RESPOND ===`);
-            for (var d of inbox.directives) {
+            for (const d of inbox.directives) {
               lines.push(
                 '[DIR #' +
                   d.id +
@@ -1004,7 +1004,7 @@ export function registerTools(server) {
           if (inbox.requests && inbox.requests.length > 0) {
             lines.push('');
             lines.push(`=== REQUESTS (${inbox.requests.length}) — MUST RESPOND ===`);
-            for (var r of inbox.requests) {
+            for (const r of inbox.requests) {
               lines.push(
                 '[REQ #' +
                   r.id +
@@ -1018,9 +1018,9 @@ export function registerTools(server) {
           if (inbox.messages && inbox.messages.length > 0) {
             lines.push('');
             lines.push(`=== NEW MESSAGES (${inbox.messages.length}) ===`);
-            for (var m of inbox.messages) {
-              var sender = m.from_agent || '?';
-              var target = m.to_agent ? '' : ' (broadcast)';
+            for (const m of inbox.messages) {
+              const sender = m.from_agent || '?';
+              const target = m.to_agent ? '' : ' (broadcast)';
               lines.push(
                 '[MSG #' +
                   m.id +
@@ -1037,8 +1037,8 @@ export function registerTools(server) {
         if (result?.approvals && result.approvals.length > 0) {
           lines.push('');
           lines.push(`=== YOUR APPROVALS (${result.approvals.length}) ===`);
-          for (var ap of result.approvals) {
-            var apLabel = (ap.status || 'pending').toUpperCase();
+          for (const ap of result.approvals) {
+            const apLabel = (ap.status || 'pending').toUpperCase();
             lines.push(
               '[' +
                 apLabel +
@@ -1078,32 +1078,32 @@ export function registerTools(server) {
       operator_id: z.string().optional().describe('Your operator ID (auto-detected if omitted)'),
     },
     async (args) => {
-      var body = { action: args.action };
+      const body = { action: args.action };
       if (args.directive) body.directive = args.directive;
       if (args.operator_id) body.operator_id = args.operator_id;
-      var data = await apiPut('/admin/sleep', body);
+      const data = await apiPut('/admin/sleep', body);
       if (args.action === 'on') {
-        var lines = ['Sleep mode ON. Agents notified.'];
+        const lines = ['Sleep mode ON. Agents notified.'];
         if (data.sleep_mode?.directive) lines.push(`Directive: ${data.sleep_mode.directive}`);
         lines.push(
           'Run mycelium_sleep with action=off when you wake up to get your morning summary.',
         );
         return text(lines.join('\n'));
       } else {
-        var wlines = ['Sleep mode OFF. Good morning!'];
-        var log = data.morning_summary;
+        const wlines = ['Sleep mode OFF. Good morning!'];
+        const log = data.morning_summary;
         if (log) {
           if (log.tasks_completed && log.tasks_completed.length > 0) {
             wlines.push(`\nTasks completed (${log.tasks_completed.length}):`);
-            for (var t of log.tasks_completed) wlines.push(`  ✓ ${t.title || t.id}`);
+            for (const t of log.tasks_completed) wlines.push(`  ✓ ${t.title || t.id}`);
           }
           if (log.steps_completed && log.steps_completed.length > 0) {
             wlines.push(`\nPlan steps completed (${log.steps_completed.length}):`);
-            for (var s of log.steps_completed) wlines.push(`  ✓ ${s.title || s.id}`);
+            for (const s of log.steps_completed) wlines.push(`  ✓ ${s.title || s.id}`);
           }
           if (log.approvals_queued && log.approvals_queued.length > 0) {
             wlines.push(`\nApprovals waiting (${log.approvals_queued.length}):`);
-            for (var a of log.approvals_queued) wlines.push(`  ! ${a.title || a.id}`);
+            for (const a of log.approvals_queued) wlines.push(`  ! ${a.title || a.id}`);
           }
           if (
             (!log.tasks_completed || log.tasks_completed.length === 0) &&
@@ -1126,11 +1126,11 @@ export function registerTools(server) {
     'Rotate your agent API key. Returns a new key — update your MCP config (MYCELIUM_API_KEY) with it and restart your session.',
     {},
     async () => {
-      var st = getState();
+      const st = getState();
       if (st.role !== 'agent' || !st.agentId) {
         return text('Rekey is only available in agent mode.');
       }
-      var result = await apiPost('/agents/rekey', {});
+      const result = await apiPost('/agents/rekey', {});
       return text(
         'New API key for ' +
           result.id +
@@ -1151,7 +1151,7 @@ export function registerTools(server) {
       avatar_url: z.string().describe('URL of the avatar image (or empty string to clear)'),
     },
     async (args) => {
-      var st = getState();
+      const st = getState();
       if (st.role !== 'agent' || !st.agentId) {
         return text('Avatar can only be set in agent mode.');
       }
@@ -1167,10 +1167,10 @@ export function registerTools(server) {
   // ===== ORGANIZATIONS =====
 
   registerDual(server, 'studio_list_orgs', 'List organizations on the network.', {}, async () => {
-    var orgs = await apiGet('/orgs');
+    const orgs = await apiGet('/orgs');
     if (!orgs.length) return text('No organizations found.');
-    var lines = [`=== Organizations (${orgs.length}) ===`];
-    for (var o of orgs) {
+    const lines = [`=== Organizations (${orgs.length}) ===`];
+    for (const o of orgs) {
       lines.push(`#${o.id} ${o.name}${o.description ? ` — ${o.description}` : ''}`);
     }
     return text(lines.join('\n'));
@@ -1185,9 +1185,9 @@ export function registerTools(server) {
       description: z.string().optional().describe('Organization description'),
     },
     async (args) => {
-      var body = { name: args.name };
+      const body = { name: args.name };
       if (args.description) body.description = args.description;
-      var result = await apiPost('/orgs', body);
+      const result = await apiPost('/orgs', body);
       return text(`Created org #${result.id}: ${args.name}`);
     },
   );
@@ -1202,13 +1202,13 @@ export function registerTools(server) {
       org_id: z.number().optional().describe('Filter by organization ID'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.org_id) params.push(`org_id=${args.org_id}`);
-      var qs = params.length ? `?${params.join('&')}` : '';
-      var projects = await apiGet(`/projects${qs}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const projects = await apiGet(`/projects${qs}`);
       if (!projects.length) return text('No projects found.');
-      var lines = [`=== Projects (${projects.length}) ===`];
-      for (var p of projects) {
+      const lines = [`=== Projects (${projects.length}) ===`];
+      for (const p of projects) {
         lines.push(
           p.id +
             ' — ' +
@@ -1233,11 +1233,11 @@ export function registerTools(server) {
       org_id: z.number().optional().describe('Organization ID to link to'),
     },
     async (args) => {
-      var body = { id: args.id, name: args.name };
+      const body = { id: args.id, name: args.name };
       if (args.description) body.description = args.description;
       if (args.type) body.type = args.type;
       if (args.org_id) body.org_id = args.org_id;
-      var _result = await apiPost('/projects', body);
+      const _result = await apiPost('/projects', body);
       return text(`Created project: ${args.id} (${args.name})`);
     },
   );
@@ -1253,7 +1253,7 @@ export function registerTools(server) {
       type: z.string().optional().describe('New project type'),
     },
     async (args) => {
-      var body = {};
+      const body = {};
       if (args.name) body.name = args.name;
       if (args.description) body.description = args.description;
       if (args.type) body.type = args.type;
@@ -1275,11 +1275,11 @@ export function registerTools(server) {
         .describe('Filter by concept type'),
     },
     async (args) => {
-      var qs = args.type ? `?type=${encodeURIComponent(args.type)}` : '';
-      var concepts = await apiGet(`/concepts${qs}`);
+      const qs = args.type ? `?type=${encodeURIComponent(args.type)}` : '';
+      const concepts = await apiGet(`/concepts${qs}`);
       if (!concepts.length) return text('No concepts found.');
-      var lines = [`=== Concepts (${concepts.length}) ===`];
-      for (var c of concepts) {
+      const lines = [`=== Concepts (${concepts.length}) ===`];
+      for (const c of concepts) {
         lines.push(`#${c.id} [${c.type}] ${c.name}${c.description ? ` — ${c.description}` : ''}`);
       }
       return text(lines.join('\n'));
@@ -1294,8 +1294,8 @@ export function registerTools(server) {
       concept_id: z.string().describe('Concept ID'),
     },
     async (args) => {
-      var concept = await apiGet(`/concepts/${encodeURIComponent(args.concept_id)}`);
-      var lines = [
+      const concept = await apiGet(`/concepts/${encodeURIComponent(args.concept_id)}`);
+      const lines = [
         `Concept #${concept.id} [${concept.type}]`,
         `Name: ${concept.name}`,
         `Description: ${concept.description || '(none)'}`,
@@ -1311,7 +1311,7 @@ export function registerTools(server) {
       if (concept.projects?.length) {
         lines.push('');
         lines.push('Linked projects:');
-        for (var p of concept.projects) {
+        for (const p of concept.projects) {
           lines.push(`  - ${p.name || p.id || p}`);
         }
       }
@@ -1332,10 +1332,10 @@ export function registerTools(server) {
       data: z.string().optional().describe('JSON string of additional concept data'),
     },
     async (args) => {
-      var body = { name: args.name, type: args.type };
+      const body = { name: args.name, type: args.type };
       if (args.description) body.description = args.description;
       if (args.data) body.data = safeParseJSON(args.data);
-      var result = await apiPost('/concepts', body);
+      const result = await apiPost('/concepts', body);
       return text(`Created concept #${result.id}: ${args.name} [${args.type}]`);
     },
   );
@@ -1355,7 +1355,7 @@ export function registerTools(server) {
       data: z.string().optional().describe('JSON string of updated concept data'),
     },
     async (args) => {
-      var body = {};
+      const body = {};
       if (args.name) body.name = args.name;
       if (args.type) body.type = args.type;
       if (args.description) body.description = args.description;
@@ -1389,10 +1389,10 @@ export function registerTools(server) {
     'List chat channels on the network.',
     {},
     async () => {
-      var channels = await apiGet('/channels');
+      const channels = await apiGet('/channels');
       if (!channels.length) return text('No channels found.');
-      var lines = [`=== Channels (${channels.length}) ===`];
-      for (var ch of channels) {
+      const lines = [`=== Channels (${channels.length}) ===`];
+      for (const ch of channels) {
         lines.push(
           '#' +
             ch.id +
@@ -1421,14 +1421,14 @@ export function registerTools(server) {
       description: z.string().optional().describe('Channel description'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         name: args.name,
         type: args.type || 'general',
         created_by: st.agentId || '__admin__',
       };
       if (args.description) body.description = args.description;
-      var result = await apiPost('/channels', body);
+      const result = await apiPost('/channels', body);
       return text(`Created channel #${result.id}: ${args.name}`);
     },
   );
@@ -1442,12 +1442,12 @@ export function registerTools(server) {
       limit: z.number().optional().describe('Max messages to return (default 30)'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.limit) params.push(`limit=${args.limit}`);
-      var qs = params.length ? `?${params.join('&')}` : '';
-      var messages = await apiGet(`/channels/${args.channel_id}/messages${qs}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const messages = await apiGet(`/channels/${args.channel_id}/messages${qs}`);
       if (!messages.length) return text('No messages in this channel.');
-      var lines = messages.map(formatMessage);
+      const lines = messages.map(formatMessage);
       return text(lines.join('\n'));
     },
   );
@@ -1461,13 +1461,13 @@ export function registerTools(server) {
       content: z.string().describe('Message content'),
     },
     async (args) => {
-      var st = getState();
-      var body = {
+      const st = getState();
+      const body = {
         content: args.content,
         from_agent: st.agentId || '__admin__',
         channel_id: args.channel_id,
       };
-      var result = await apiPost('/messages', body);
+      const result = await apiPost('/messages', body);
       return text(`Message sent to channel #${args.channel_id} (msg id: ${result.id})`);
     },
   );
@@ -1482,12 +1482,12 @@ export function registerTools(server) {
       org_id: z.string().optional().describe('Filter by organization ID'),
     },
     async (args) => {
-      var qs = args.org_id ? `?org_id=${encodeURIComponent(args.org_id)}` : '';
-      var data = await apiGet(`/teams${qs}`);
-      var teams = data.teams || data;
+      const qs = args.org_id ? `?org_id=${encodeURIComponent(args.org_id)}` : '';
+      const data = await apiGet(`/teams${qs}`);
+      const teams = data.teams || data;
       if (!teams.length) return text('No teams found.');
-      var lines = [`=== Teams (${teams.length}) ===`];
-      for (var t of teams) {
+      const lines = [`=== Teams (${teams.length}) ===`];
+      for (const t of teams) {
         lines.push(
           t.id +
             ' — ' +
@@ -1510,15 +1510,15 @@ export function registerTools(server) {
       team_id: z.string().describe('Team ID'),
     },
     async (args) => {
-      var team = await apiGet(`/teams/${encodeURIComponent(args.team_id)}`);
-      var lines = [
+      const team = await apiGet(`/teams/${encodeURIComponent(args.team_id)}`);
+      const lines = [
         `Team: ${team.id} — ${team.name}`,
         `Org: ${team.org_id}`,
         `Description: ${team.description || '(none)'}`,
       ];
       if (team.members?.length) {
         lines.push(`\nMembers (${team.members.length}):`);
-        for (var m of team.members) {
+        for (const m of team.members) {
           lines.push(
             '  ' +
               m.user_id +
@@ -1532,7 +1532,7 @@ export function registerTools(server) {
       }
       if (team.projects?.length) {
         lines.push(`\nProjects (${team.projects.length}):`);
-        for (var p of team.projects) {
+        for (const p of team.projects) {
           lines.push(`  ${typeof p === 'string' ? p : `${p.id} — ${p.name || ''}`}`);
         }
       }
@@ -1551,7 +1551,7 @@ export function registerTools(server) {
       description: z.string().optional().describe('Team description'),
     },
     async (args) => {
-      var result = await apiPost('/teams', {
+      const result = await apiPost('/teams', {
         id: args.id,
         name: args.name,
         org_id: args.org_id,
@@ -1575,7 +1575,7 @@ export function registerTools(server) {
       is_primary: z.boolean().optional().describe("Whether this is the user's primary team"),
     },
     async (args) => {
-      var _result = await apiPost(`/teams/${encodeURIComponent(args.team_id)}/members`, {
+      const _result = await apiPost(`/teams/${encodeURIComponent(args.team_id)}/members`, {
         user_id: args.user_id,
         user_type: args.user_type,
         role: args.role || 'member',
@@ -1630,9 +1630,9 @@ export function registerTools(server) {
       project: z.string().optional().describe('Project context (default: mycelium)'),
     },
     async (args) => {
-      var st = getState();
-      var requester = st.agentId || '__admin__';
-      var result = await apiPost('/approvals', {
+      const st = getState();
+      const requester = st.agentId || '__admin__';
+      const result = await apiPost('/approvals', {
         action_type: args.action_type,
         requested_by: requester,
         title: args.title,
@@ -1659,8 +1659,8 @@ export function registerTools(server) {
       approval_id: z.number().describe('Approval ID to check'),
     },
     async (args) => {
-      var approval = await apiGet(`/approvals/${args.approval_id}`);
-      var lines = [
+      const approval = await apiGet(`/approvals/${args.approval_id}`);
+      const lines = [
         `Approval #${approval.id} [${approval.status}]`,
         `Action: ${approval.action_type}`,
         `Title: ${approval.title}`,
@@ -1720,16 +1720,16 @@ export function registerTools(server) {
       project: z.string().optional().describe('Filter by project'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.status) params.push(`status=${encodeURIComponent(args.status)}`);
       else params.push('status=pending');
       if (args.action_type) params.push(`action_type=${encodeURIComponent(args.action_type)}`);
       if (args.project) params.push(`project=${encodeURIComponent(args.project)}`);
-      var qs = params.length ? `?${params.join('&')}` : '';
-      var approvals = await apiGet(`/approvals${qs}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const approvals = await apiGet(`/approvals${qs}`);
       if (!approvals.length) return text('No approvals found.');
-      var lines = [`=== Approvals (${approvals.length}) ===`];
-      for (var a of approvals) {
+      const lines = [`=== Approvals (${approvals.length}) ===`];
+      for (const a of approvals) {
         lines.push(
           '#' +
             a.id +
@@ -1763,7 +1763,7 @@ export function registerTools(server) {
       priority: { type: 'string', description: 'Priority: low, normal, high, urgent' },
     },
     async (params) => {
-      var res = await apiPost('/work/request', {
+      const res = await apiPost('/work/request', {
         type: params.type,
         target: params.target || '',
         description: params.description || '',
@@ -1795,8 +1795,8 @@ export function registerTools(server) {
       project_id: { type: 'string', description: 'Project context' },
     },
     async (params) => {
-      var st = getState();
-      var res = await apiPost('/messages', {
+      const st = getState();
+      const res = await apiPost('/messages', {
         from: st.agentId || '__admin__',
         to: params.to,
         msg_type: 'directive',
@@ -1831,7 +1831,7 @@ export function registerTools(server) {
       status: { type: 'string', description: 'New status (default: ready)' },
     },
     async (params) => {
-      var _res = await apiPut(`/assets/${params.asset_id}`, {
+      const _res = await apiPut(`/assets/${params.asset_id}`, {
         status: params.status || 'ready',
         path: params.path || '',
       });
@@ -1860,7 +1860,7 @@ export function registerTools(server) {
       asset_id: { type: 'number', description: 'Asset ID to check' },
     },
     async (params) => {
-      var res = await apiGet(`/assets/${params.asset_id}`);
+      const res = await apiGet(`/assets/${params.asset_id}`);
       if (res.status !== 'ready') {
         return {
           content: [
@@ -1871,7 +1871,7 @@ export function registerTools(server) {
           ],
         };
       }
-      var url = res.download_url || res.path || '(no file attached)';
+      const url = res.download_url || res.path || '(no file attached)';
       return {
         content: [
           {
@@ -1906,9 +1906,9 @@ export function registerTools(server) {
         .describe('Agent ID to resolve profile for (defaults to self/current agent)'),
     },
     async (args) => {
-      var st = getState();
-      var targetId = args.agent_id || st.agentId || '__admin__';
-      var profile = await apiGet(`/profiles/resolve/${encodeURIComponent(targetId)}`);
+      const st = getState();
+      const targetId = args.agent_id || st.agentId || '__admin__';
+      const profile = await apiGet(`/profiles/resolve/${encodeURIComponent(targetId)}`);
       return text(profile);
     },
   );
@@ -1925,11 +1925,11 @@ export function registerTools(server) {
       layer: z.string().optional().describe('Filter by layer (e.g. platform, customer, agent)'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.node_type) params.push(`node_type=${encodeURIComponent(args.node_type)}`);
       if (args.layer) params.push(`layer=${encodeURIComponent(args.layer)}`);
-      var qs = params.length ? `?${params.join('&')}` : '';
-      var profiles = await apiGet(`/profiles${qs}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const profiles = await apiGet(`/profiles${qs}`);
       return text(profiles);
     },
   );
@@ -1942,19 +1942,19 @@ export function registerTools(server) {
       md_content: z.string().describe('The full text of the CLAUDE.md file'),
     },
     async (args) => {
-      var st = getState();
-      var agentId = st.agentId || '__admin__';
+      const st = getState();
+      const agentId = st.agentId || '__admin__';
 
       // 1. Resolve profile to get checkpoints and blocklist
-      var profile = await apiGet(`/profiles/resolve/${encodeURIComponent(agentId)}`);
-      var checkpoints = profile?.checkpoints || [];
-      var blocklist = profile?.blocklist || [];
+      const profile = await apiGet(`/profiles/resolve/${encodeURIComponent(agentId)}`);
+      const checkpoints = profile?.checkpoints || [];
+      const blocklist = profile?.blocklist || [];
 
       // 2. Check md_content against checkpoints and blocklist
-      var content = args.md_content;
-      var anchorsPresent = [];
-      var anchorsMissing = [];
-      for (var cp of checkpoints) {
+      const content = args.md_content;
+      const anchorsPresent = [];
+      const anchorsMissing = [];
+      for (const cp of checkpoints) {
         if (content.indexOf(cp) !== -1) {
           anchorsPresent.push(cp);
         } else {
@@ -1962,16 +1962,16 @@ export function registerTools(server) {
         }
       }
 
-      var blocklistFound = [];
-      for (var bl of blocklist) {
+      const blocklistFound = [];
+      for (const bl of blocklist) {
         if (content.indexOf(bl) !== -1) {
           blocklistFound.push(bl);
         }
       }
 
       // 3. Build md_report
-      var hash = createHash('sha256').update(content).digest('hex').substring(0, 16);
-      var mdReport = {
+      const hash = createHash('sha256').update(content).digest('hex').substring(0, 16);
+      const mdReport = {
         hash: hash,
         anchors_present: anchorsPresent,
         anchors_missing: anchorsMissing,
@@ -1981,7 +1981,7 @@ export function registerTools(server) {
       };
 
       // 4. Send via heartbeat with state_snapshot containing md_report
-      var heartbeatBody = {
+      const heartbeatBody = {
         status: 'online',
         working_on: st.workingOn || '',
         state_snapshot: JSON.stringify({ md_report: mdReport }),
@@ -1989,7 +1989,7 @@ export function registerTools(server) {
       await apiPost('/agents/heartbeat', heartbeatBody);
 
       // 5. Return the report
-      var lines = [
+      const lines = [
         `=== CLAUDE.md Report for ${agentId} ===`,
         `Hash: ${hash}`,
         `Lines: ${mdReport.line_count}`,
@@ -1997,16 +1997,16 @@ export function registerTools(server) {
       ];
       if (anchorsPresent.length) {
         lines.push(`Checkpoints present (${anchorsPresent.length}/${checkpoints.length}):`);
-        for (var ap of anchorsPresent) lines.push(`  [OK] ${ap}`);
+        for (const ap of anchorsPresent) lines.push(`  [OK] ${ap}`);
       }
       if (anchorsMissing.length) {
         lines.push(`Checkpoints MISSING (${anchorsMissing.length}/${checkpoints.length}):`);
-        for (var am of anchorsMissing) lines.push(`  [MISSING] ${am}`);
+        for (const am of anchorsMissing) lines.push(`  [MISSING] ${am}`);
       }
       if (blocklistFound.length) {
         lines.push('');
         lines.push(`BLOCKLIST VIOLATIONS (${blocklistFound.length}):`);
-        for (var bf of blocklistFound) lines.push(`  [BLOCKED] ${bf}`);
+        for (const bf of blocklistFound) lines.push(`  [BLOCKED] ${bf}`);
       } else {
         lines.push('');
         lines.push('Blocklist: clean (0 violations)');
@@ -2029,9 +2029,9 @@ export function registerTools(server) {
       body: z.string().optional().describe('JSON body string for POST/PUT'),
     },
     async (args) => {
-      var parsed = args.body ? safeParseJSON(args.body) : undefined;
-      var fn = { GET: apiGet, POST: apiPost, PUT: apiPut, DELETE: apiDelete }[args.method];
-      var result = await fn(args.path, parsed);
+      const parsed = args.body ? safeParseJSON(args.body) : undefined;
+      const fn = { GET: apiGet, POST: apiPost, PUT: apiPut, DELETE: apiDelete }[args.method];
+      const result = await fn(args.path, parsed);
       return text(result);
     },
   );
@@ -2050,7 +2050,7 @@ export function registerTools(server) {
       notes: z.string().describe('Notes text — the agent will see this on next boot'),
     },
     async (args) => {
-      var result = await apiPut(`/agents/${args.agent_id}/savepoint/notes`, {
+      const result = await apiPut(`/agents/${args.agent_id}/savepoint/notes`, {
         notes: args.notes,
       });
       return text(
@@ -2071,9 +2071,9 @@ export function registerTools(server) {
       agent_id: z.string().describe('Agent ID to view savepoint for'),
     },
     async (args) => {
-      var sp = await apiGet(`/agents/${args.agent_id}/savepoint`);
+      const sp = await apiGet(`/agents/${args.agent_id}/savepoint`);
       if (!sp.has_savepoint && !sp.id) return text(`No savepoint found for ${args.agent_id}`);
-      var lines = [
+      const lines = [
         `=== Savepoint for ${args.agent_id} ===`,
         `Last heartbeat: ${sp.heartbeat_at || 'unknown'}`,
         `Session: ${sp.session_id || 'none'}`,
@@ -2099,15 +2099,15 @@ export function registerTools(server) {
       agent_id: z.string().describe('Agent ID to check diff for'),
     },
     async (args) => {
-      var diff = await apiGet(`/agents/${args.agent_id}/savepoint/diff`);
+      const diff = await apiGet(`/agents/${args.agent_id}/savepoint/diff`);
       if (!diff.has_savepoint)
         return text(`No savepoint found for ${args.agent_id} — first session.`);
-      var lines = [
+      const lines = [
         `=== Changes since savepoint (${diff.savepoint_at}) ===`,
         `Was working on: ${diff.was_working_on || 'nothing'}`,
       ];
       if (diff.notes) lines.push(`NOTES FROM ADMIN: ${diff.notes}`);
-      var s = diff.summary;
+      const s = diff.summary;
       lines.push('');
       lines.push('Changes:');
       if (s.messages > 0) lines.push(`  ${s.messages} new messages`);
@@ -2145,15 +2145,15 @@ export function registerTools(server) {
       limit: z.number().optional().describe('Max results (default 20)'),
     },
     async (args) => {
-      var params = [];
+      const params = [];
       if (args.status) params.push(`status=${encodeURIComponent(args.status)}`);
       if (args.limit) params.push(`limit=${args.limit}`);
       else params.push('limit=20');
-      var jobs = await apiGet(`/drones/jobs${params.length ? `?${params.join('&')}` : ''}`);
+      const jobs = await apiGet(`/drones/jobs${params.length ? `?${params.join('&')}` : ''}`);
       if (!jobs.length) return text('No drone jobs found.');
-      var lines = [`=== Drone Jobs (${jobs.length}) ===`];
-      for (var j of jobs) {
-        var line = `#${j.id} [${j.status}] ${j.title}`;
+      const lines = [`=== Drone Jobs (${jobs.length}) ===`];
+      for (const j of jobs) {
+        let line = `#${j.id} [${j.status}] ${j.title}`;
         if (j.drone_id) line += ` (worker: ${j.drone_id})`;
         line += ` [p${j.priority}]`;
         if (j.started_at) line += ` started ${timeAgo(j.started_at)}`;
@@ -2173,8 +2173,8 @@ export function registerTools(server) {
       job_id: z.number().describe('Drone job ID'),
     },
     async (args) => {
-      var job = await apiGet(`/drones/jobs/${args.job_id}`);
-      var lines = [
+      const job = await apiGet(`/drones/jobs/${args.job_id}`);
+      const lines = [
         `=== Drone Job #${job.id} ===`,
         `Title: ${job.title}`,
         `Status: ${job.status}`,
@@ -2196,7 +2196,7 @@ export function registerTools(server) {
       if (job.error) lines.push(`Error:\n${job.error}`);
       if (job.result_data && job.result_data !== '{}') {
         try {
-          var rd = JSON.parse(job.result_data);
+          const rd = JSON.parse(job.result_data);
           if (rd.stdout) lines.push(`Stdout:\n${rd.stdout.substring(0, 1000)}`);
           if (rd.stderr) lines.push(`Stderr:\n${rd.stderr.substring(0, 500)}`);
         } catch {
@@ -2228,14 +2228,14 @@ export function registerTools(server) {
         ),
     },
     async (args) => {
-      var body = { title: args.title };
+      const body = { title: args.title };
       if (args.command) body.command = args.command;
       if (args.requires) body.requires = args.requires;
       if (args.priority) body.priority = args.priority;
       if (args.input_data) body.input_data = args.input_data;
       if (args.job_type) body.job_type = args.job_type;
-      var result = await apiPost('/drones/jobs', body);
-      var info = `Queued drone job #${result.id}: ${args.title}`;
+      const result = await apiPost('/drones/jobs', body);
+      let info = `Queued drone job #${result.id}: ${args.title}`;
       if (args.job_type) info += `\nTemplate: ${args.job_type}`;
       info +=
         '\nPriority: ' +
@@ -2265,16 +2265,16 @@ export function registerTools(server) {
     'List registered drone workers and their status.',
     {},
     async () => {
-      var drones = await apiGet('/drones');
+      const drones = await apiGet('/drones');
       if (!drones.length) return text('No drone workers registered.');
-      var lines = [`=== Drone Workers (${drones.length}) ===`];
-      for (var d of drones) {
-        var statusIcon = d.status === 'online' ? '[ON]' : '[OFF]';
-        var caps = [];
+      const lines = [`=== Drone Workers (${drones.length}) ===`];
+      for (const d of drones) {
+        const statusIcon = d.status === 'online' ? '[ON]' : '[OFF]';
+        let caps = [];
         try {
           caps = JSON.parse(d.capabilities);
         } catch {}
-        var line = `${statusIcon} ${d.name} (${d.id})`;
+        let line = `${statusIcon} ${d.name} (${d.id})`;
         if (caps.length) line += ` [${caps.join(', ')}]`;
         if (d.working_on) line += `\n  Working on: ${d.working_on}`;
         line += `\n  Last seen: ${timeAgo(d.last_heartbeat)}`;
@@ -2290,11 +2290,11 @@ export function registerTools(server) {
     'List uploaded drone artifacts (scripts, models, result zips).',
     {},
     async () => {
-      var artifacts = await apiGet('/drones/artifacts');
+      const artifacts = await apiGet('/drones/artifacts');
       if (!artifacts.length) return text('No artifacts uploaded.');
-      var lines = [`=== Drone Artifacts (${artifacts.length}) ===`];
-      for (var a of artifacts) {
-        var size =
+      const lines = [`=== Drone Artifacts (${artifacts.length}) ===`];
+      for (const a of artifacts) {
+        const size =
           a.size > 1048576
             ? `${(a.size / 1048576).toFixed(1)} MB`
             : `${Math.round(a.size / 1024)} KB`;
@@ -2312,11 +2312,11 @@ export function registerTools(server) {
     'List job templates for smart drone job routing. Templates define what each job type needs (deps, GPU, artifacts).',
     {},
     async () => {
-      var templates = await apiGet('/drones/templates');
+      const templates = await apiGet('/drones/templates');
       if (!templates.length) return text('No job templates found.');
-      var lines = [`=== Job Templates (${templates.length}) ===`];
-      for (var t of templates) {
-        var reqs = t.requires;
+      const lines = [`=== Job Templates (${templates.length}) ===`];
+      for (const t of templates) {
+        let reqs = t.requires;
         try {
           if (typeof reqs === 'string') reqs = JSON.parse(reqs);
         } catch (_e) {
@@ -2347,20 +2347,20 @@ export function registerTools(server) {
       drone_id: z.string().describe('Drone ID to check compatibility for'),
     },
     async (args) => {
-      var result = await apiGet(`/drones/${encodeURIComponent(args.drone_id)}/compatibility`);
+      const result = await apiGet(`/drones/${encodeURIComponent(args.drone_id)}/compatibility`);
       if (result.error) return text(`Error: ${result.error}`);
-      var lines = [`=== Compatibility for ${result.drone_id} ===`];
+      const lines = [`=== Compatibility for ${result.drone_id} ===`];
       if (result.compatible?.length) {
         lines.push('');
         lines.push('Compatible:');
-        for (var c of result.compatible) {
+        for (const c of result.compatible) {
           lines.push(`  [OK] ${c.template} (${c.name})${c.notes ? ` — ${c.notes}` : ''}`);
         }
       }
       if (result.incompatible?.length) {
         lines.push('');
         lines.push('Incompatible:');
-        for (var ic of result.incompatible) {
+        for (const ic of result.incompatible) {
           lines.push(`  [X] ${ic.template} (${ic.name}) — ${ic.reasons.join(', ')}`);
         }
       }
@@ -2374,22 +2374,22 @@ export function registerTools(server) {
   // (registerTools continues — GitHub, sleep/wake tools below, closed after studio_wake)
 
   function formatOverview(data, currentAgentId) {
-    var lines = [];
+    const lines = [];
 
     // Agents — hide the "alter ego" agent when booting with identity.
     // dev-claude and greatness-claude are the same operator in different modes.
     // When one boots, the other is noise. Other same-operator agents (macbook, admin-bot) stay visible.
-    var agents = data.agents || [];
+    let agents = data.agents || [];
     if (currentAgentId && agents.length > 0) {
-      var SIBLING_PAIRS = { 'dev-claude': 'greatness-claude', 'greatness-claude': 'dev-claude' };
-      var hiddenSibling = SIBLING_PAIRS[currentAgentId];
+      const SIBLING_PAIRS = { 'dev-claude': 'greatness-claude', 'greatness-claude': 'dev-claude' };
+      const hiddenSibling = SIBLING_PAIRS[currentAgentId];
       if (hiddenSibling) {
         agents = agents.filter((a) => a.id !== hiddenSibling);
       }
     }
     if (agents.length > 0) {
       lines.push('=== Agents ===');
-      for (var a of agents) {
+      for (const a of agents) {
         // Support both slim format (id, status, working_on, heartbeat) and full format
         if (a.heartbeat) {
           lines.push(
@@ -2410,7 +2410,7 @@ export function registerTools(server) {
 
     // Counts (slim format)
     if (data.counts) {
-      var c = data.counts;
+      const c = data.counts;
       lines.push('');
       lines.push('=== Counts ===');
       lines.push(`Tasks: ${c.tasks_open || 0} open, ${c.tasks_in_progress || 0} in progress`);
@@ -2435,7 +2435,7 @@ export function registerTools(server) {
     if (data.attention && data.attention.length > 0) {
       lines.push('');
       lines.push('=== Needs Attention ===');
-      for (var item of data.attention) {
+      for (const item of data.attention) {
         lines.push(
           '[' +
             item.type +
@@ -2456,18 +2456,18 @@ export function registerTools(server) {
     if (data.recent_activity && data.recent_activity.length > 0) {
       lines.push('');
       lines.push('=== Recent ===');
-      for (var act of data.recent_activity) {
+      for (const act of data.recent_activity) {
         lines.push(act);
       }
     }
 
     // Legacy full format fallback — if data has `tasks` object, use old format
     if (data.tasks && !data.counts) {
-      var tasks = data.tasks || {};
-      var open = tasks.open || [];
-      var inProg = tasks.in_progress || [];
-      var review = tasks.review || [];
-      var done = tasks.done || [];
+      const tasks = data.tasks || {};
+      const open = tasks.open || [];
+      const inProg = tasks.in_progress || [];
+      const review = tasks.review || [];
+      const done = tasks.done || [];
       lines.push('');
       lines.push(
         '=== Tasks: ' +
@@ -2480,31 +2480,31 @@ export function registerTools(server) {
           done.length +
           ' recently done ===',
       );
-      for (var t of [].concat(open, inProg, review)) lines.push(formatTask(t));
+      for (const t of [].concat(open, inProg, review)) lines.push(formatTask(t));
 
-      var plans = data.plans || [];
+      const plans = data.plans || [];
       if (plans.length) {
         lines.push('');
         lines.push(`=== Plans (${plans.length}) ===`);
-        for (var p of plans) lines.push(`Plan #${p.id} [${p.status}] ${p.title}`);
+        for (const p of plans) lines.push(`Plan #${p.id} [${p.status}] ${p.title}`);
       }
 
-      var msgs = data.messages || [];
-      var pendingReqs = msgs.filter(
+      const msgs = data.messages || [];
+      const pendingReqs = msgs.filter(
         (m) => m.msg_type === 'request' && m.status !== 'completed' && m.status !== 'resolved',
       );
       if (pendingReqs.length) {
         lines.push('');
         lines.push(`=== Pending Requests (${pendingReqs.length}) ===`);
-        for (var r of pendingReqs) lines.push(formatMessage(r));
+        for (const r of pendingReqs) lines.push(formatMessage(r));
       }
 
-      var bugs = data.bugs || [];
-      var openBugs = bugs.filter((b) => b.status === 'open' || b.status === 'in_progress');
+      const bugs = data.bugs || [];
+      const openBugs = bugs.filter((b) => b.status === 'open' || b.status === 'in_progress');
       if (openBugs.length) {
         lines.push('');
         lines.push(`=== Open Bugs (${openBugs.length}) ===`);
-        for (var b of openBugs) lines.push(formatBug(b));
+        for (const b of openBugs) lines.push(formatBug(b));
       }
     }
 
@@ -2542,12 +2542,12 @@ export function registerTools(server) {
         .describe('PR state filter (default: open)'),
     },
     async (args) => {
-      var qs = `?state=${args.state || 'open'}`;
-      var result = await apiGet(`/github/prs/${args.owner}/${args.repo}${qs}`);
+      const qs = `?state=${args.state || 'open'}`;
+      const result = await apiGet(`/github/prs/${args.owner}/${args.repo}${qs}`);
       if (!result.prs?.length)
         return text(`No ${args.state || 'open'} PRs in ${args.owner}/${args.repo}`);
-      var lines = [`=== PRs: ${args.owner}/${args.repo} (${result.count}) ===`];
-      for (var pr of result.prs) {
+      const lines = [`=== PRs: ${args.owner}/${args.repo} (${result.count}) ===`];
+      for (const pr of result.prs) {
         lines.push(
           '#' +
             pr.number +
@@ -2582,10 +2582,10 @@ export function registerTools(server) {
       commit_message: z.string().optional().describe('Commit message body'),
     },
     async (args) => {
-      var body = { merge_method: args.merge_method || 'squash' };
+      const body = { merge_method: args.merge_method || 'squash' };
       if (args.commit_title) body.commit_title = args.commit_title;
       if (args.commit_message) body.commit_message = args.commit_message;
-      var result = await apiPost(
+      const result = await apiPost(
         `/github/prs/${args.owner}/${args.repo}/${args.number}/merge`,
         body,
       );
@@ -2617,7 +2617,7 @@ export function registerTools(server) {
       draft: z.boolean().optional().describe('Create as draft PR'),
     },
     async (args) => {
-      var result = await apiPost(`/github/prs/${args.owner}/${args.repo}`, {
+      const result = await apiPost(`/github/prs/${args.owner}/${args.repo}`, {
         title: args.title,
         head: args.head,
         base: args.base,
@@ -2633,7 +2633,7 @@ export function registerTools(server) {
 
 // Convert a plugin tool schema field to a Zod type
 function fieldToZod(field) {
-  var base;
+  let base;
   if (field.enum) {
     base = z.enum(field.enum);
   } else if (field.type === 'number' || field.type === 'integer') {
@@ -2641,7 +2641,7 @@ function fieldToZod(field) {
   } else if (field.type === 'boolean') {
     base = z.boolean();
   } else if (field.type === 'array') {
-    var itemZod = field.items ? fieldToZod(field.items) : z.any();
+    const itemZod = field.items ? fieldToZod(field.items) : z.any();
     base = z.array(itemZod);
   } else if (field.type === 'object') {
     if (field.properties) {
@@ -2658,11 +2658,11 @@ function fieldToZod(field) {
 
 // Convert a JSON Schema object with properties to a Zod object
 function jsonSchemaObjectToZod(schema) {
-  var shape = {};
-  var props = schema.properties || {};
-  var required = schema.required || [];
-  for (var [key, field] of Object.entries(props)) {
-    var zodField = fieldToZod(field);
+  const shape = {};
+  const props = schema.properties || {};
+  const required = schema.required || [];
+  for (const [key, field] of Object.entries(props)) {
+    let zodField = fieldToZod(field);
     if (!required.includes(key)) zodField = zodField.optional();
     shape[key] = zodField;
   }
@@ -2675,10 +2675,10 @@ function pluginSchemaToZod(schema) {
 
   // Nested JSON Schema format (has "type": "object" at top level)
   if (schema.type === 'object' && schema.properties) {
-    var shape = {};
-    var required = schema.required || [];
-    for (var [key, field] of Object.entries(schema.properties)) {
-      var zodField = fieldToZod(field);
+    const shape = {};
+    const required = schema.required || [];
+    for (const [key, field] of Object.entries(schema.properties)) {
+      let zodField = fieldToZod(field);
       if (!required.includes(key)) zodField = zodField.optional();
       shape[key] = zodField;
     }
@@ -2686,9 +2686,9 @@ function pluginSchemaToZod(schema) {
   }
 
   // Flat key-value format (outreach-style: { key: { type, description, required, enum } })
-  var flat = {};
-  for (var [key, field] of Object.entries(schema)) {
-    var zodField = fieldToZod(field);
+  const flat = {};
+  for (const [key, field] of Object.entries(schema)) {
+    let zodField = fieldToZod(field);
     if (!field.required) zodField = zodField.optional();
     flat[key] = zodField;
   }
@@ -2700,8 +2700,8 @@ function pluginSchemaToZod(schema) {
 // the wrong endpoint (e.g. /assets//upload) and surface as a confusing 404.
 function buildPath(pathTemplate, args) {
   return pathTemplate.replace(/\{(\w+)\}|:(\w+)/g, (_, a, b) => {
-    var key = a || b;
-    var val = args[key];
+    const key = a || b;
+    const val = args[key];
     if (val === undefined || val === null || val === '') {
       throw new Error(`Missing required path parameter: ${key}`);
     }
@@ -2711,46 +2711,46 @@ function buildPath(pathTemplate, args) {
 
 // Build a handler function for a plugin tool based on its endpoint config
 function buildPluginHandler(endpoint) {
-  var method = (endpoint.method || 'GET').toUpperCase();
-  var pathTemplate = endpoint.path;
-  var queryMap = endpoint.queryMap || {};
-  var bodyMap = endpoint.bodyMap || {};
+  const method = (endpoint.method || 'GET').toUpperCase();
+  const pathTemplate = endpoint.path;
+  const queryMap = endpoint.queryMap || {};
+  const bodyMap = endpoint.bodyMap || {};
 
   return async (args) => {
-    var path = buildPath(pathTemplate, args);
+    const path = buildPath(pathTemplate, args);
 
     if (method === 'GET') {
-      var params = [];
-      for (var [argKey, queryKey] of Object.entries(queryMap)) {
+      const params = [];
+      for (const [argKey, queryKey] of Object.entries(queryMap)) {
         if (args[argKey] !== undefined && args[argKey] !== null) {
           params.push(`${queryKey}=${encodeURIComponent(args[argKey])}`);
         }
       }
-      var url = path + (params.length ? `?${params.join('&')}` : '');
-      var result = await apiGet(url);
+      const url = path + (params.length ? `?${params.join('&')}` : '');
+      const result = await apiGet(url);
       return text(result);
     }
 
     // POST / PUT / DELETE — build request body
-    var body = {};
+    const body = {};
     if (Object.keys(bodyMap).length > 0) {
-      for (var [argKey, bodyKey] of Object.entries(bodyMap)) {
+      for (const [argKey, bodyKey] of Object.entries(bodyMap)) {
         if (args[argKey] !== undefined) body[bodyKey] = args[argKey];
       }
     } else {
       // No bodyMap — pass all args except path params as body
-      var pathParams = new Set();
+      const pathParams = new Set();
       pathTemplate.replace(/\{(\w+)\}|:(\w+)/g, (_, a, b) => {
         pathParams.add(a || b);
       });
-      for (var [key, val] of Object.entries(args)) {
+      for (const [key, val] of Object.entries(args)) {
         if (!pathParams.has(key) && val !== undefined) body[key] = val;
       }
     }
 
-    var fn = { POST: apiPost, PUT: apiPut, DELETE: apiDelete }[method];
+    const fn = { POST: apiPost, PUT: apiPut, DELETE: apiDelete }[method];
     if (!fn) throw new Error(`Unsupported HTTP method: ${method}`);
-    var result = await fn(path, body);
+    const result = await fn(path, body);
     return text(result);
   };
 }
@@ -2758,20 +2758,20 @@ function buildPluginHandler(endpoint) {
 // Fetch plugin MCP tools from the server and register them dynamically
 export async function registerPluginTools(server) {
   try {
-    var tools = await apiGet('/plugins/mcp-tools');
+    const tools = await apiGet('/plugins/mcp-tools');
     if (!Array.isArray(tools) || tools.length === 0) {
       process.stderr.write('Plugin discovery: no tools returned\n');
       return 0;
     }
     // Suppress per-tool notifications during bulk registration to avoid
     // flooding the MCP client (which can cause Claude Code to drop the connection).
-    var origSendToolListChanged = server.sendToolListChanged.bind(server);
+    const origSendToolListChanged = server.sendToolListChanged.bind(server);
     server.sendToolListChanged = () => {};
-    var count = 0;
-    for (var tool of tools) {
+    let count = 0;
+    for (const tool of tools) {
       try {
-        var schema = pluginSchemaToZod(tool.schema);
-        var handler = buildPluginHandler(tool.endpoint);
+        const schema = pluginSchemaToZod(tool.schema);
+        const handler = buildPluginHandler(tool.endpoint);
         registerDual(server, tool.name, tool.description, schema, handler);
         count++;
       } catch (err) {

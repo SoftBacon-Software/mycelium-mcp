@@ -6,11 +6,11 @@ import { join } from 'node:path';
 
 // Read key from settings.json as ground truth — env vars from Claude Code can be stale
 function resolveKey() {
-  var envKey = process.env.MYCELIUM_API_KEY || '';
+  const envKey = process.env.MYCELIUM_API_KEY || '';
   try {
-    var settingsPath = join(homedir(), '.claude', 'settings.json');
-    var settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
-    var mcpEnv = settings.mcpServers?.mycelium?.env;
+    const settingsPath = join(homedir(), '.claude', 'settings.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    const mcpEnv = settings.mcpServers?.mycelium?.env;
     if (mcpEnv?.MYCELIUM_API_KEY) return mcpEnv.MYCELIUM_API_KEY;
   } catch {}
   return envKey;
@@ -26,7 +26,7 @@ const TIMEOUT_MS = parseInt(process.env.MYCELIUM_TIMEOUT_MS, 10) || 30000;
 
 function authHeaders() {
   if (ROLE === 'admin') {
-    var headers = { 'X-Admin-Key': API_KEY };
+    const headers = { 'X-Admin-Key': API_KEY };
     // Identify who is using the admin key so actions aren't attributed to __system__
     if (AGENT_ID) headers['X-Acting-As'] = AGENT_ID;
     return headers;
@@ -35,15 +35,15 @@ function authHeaders() {
 }
 
 async function request(method, path, body, reqOpts) {
-  var url = API_URL + path;
-  var headers = { ...authHeaders() };
-  var timeoutMs = reqOpts?.timeoutMs || TIMEOUT_MS;
-  var opts = { method, headers, signal: AbortSignal.timeout(timeoutMs) };
+  const url = API_URL + path;
+  const headers = { ...authHeaders() };
+  const timeoutMs = reqOpts?.timeoutMs || TIMEOUT_MS;
+  const opts = { method, headers, signal: AbortSignal.timeout(timeoutMs) };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  var res;
+  let res;
   try {
     res = await fetch(url, opts);
   } catch (err) {
@@ -52,11 +52,11 @@ async function request(method, path, body, reqOpts) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       throw new Error(`Mycelium API timeout after ${timeoutMs}ms (${method} ${url})`);
     }
-    var cause = err.cause?.message ? ` — ${err.cause.message}` : '';
+    const cause = err.cause?.message ? ` — ${err.cause.message}` : '';
     throw new Error(`Mycelium API unreachable (${method} ${url}): ${err.message}${cause}`);
   }
-  var text = await res.text();
-  var data;
+  const text = await res.text();
+  let data;
   try {
     data = JSON.parse(text);
   } catch {
@@ -65,7 +65,7 @@ async function request(method, path, body, reqOpts) {
   if (!res.ok) {
     // Prefer the server's error field; truncate raw bodies (proxy HTML error
     // pages can be huge) and always include the status code.
-    var detail = data?.error || (text || '').slice(0, 500) || res.statusText;
+    const detail = data?.error || (text || '').slice(0, 500) || res.statusText;
     throw new Error(`HTTP ${res.status}: ${detail}`);
   }
   return data;
